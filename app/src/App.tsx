@@ -99,6 +99,17 @@ function formatCoord(value: number): string {
   return value.toFixed(5);
 }
 
+function parseLocaleNumber(raw: string): number {
+  const normalized = raw.replace(",", ".").trim();
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : Number.NaN;
+}
+
+function formatKmLocale(value: number): string {
+  const normalized = Number(value.toFixed(2)).toString();
+  return normalized.replace(".", ",");
+}
+
 function parseCoordPair(raw: string): [number, number] {
   const parts = raw.split(";");
   if (parts.length !== 2) throw new Error("Koordinaten fehlen.");
@@ -112,7 +123,7 @@ function encodeQuestionCode(payload: QuestionCode): string {
   if (payload.type === "RADAR") {
     const center = payload.payload.center as [number, number];
     const radiusKm = Number(payload.payload.radiusKm);
-    return `RADAR_${payload.qid}_${formatCoord(center[0])};${formatCoord(center[1])};${radiusKm}km`;
+    return `RADAR_${payload.qid}_${formatCoord(center[0])};${formatCoord(center[1])};${formatKmLocale(radiusKm)}km`;
   }
   if (payload.type === "THERMO_PATH") {
     const start = payload.payload.start as [number, number];
@@ -135,10 +146,10 @@ function encodeAnswerCode(payload: AnswerCode): string {
 }
 
 function decodeCode(raw: string): QuestionCode | AnswerCode {
-  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:\.\d+)?)km$/i);
+  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:[\.,]\d+)?)km$/i);
   if (radarQ) {
     const center = parseCoordPair(radarQ[2]);
-    return { qid: radarQ[1].toUpperCase(), type: "RADAR", payload: { center, radiusKm: Number(radarQ[3]) } };
+    return { qid: radarQ[1].toUpperCase(), type: "RADAR", payload: { center, radiusKm: parseLocaleNumber(radarQ[3]) } };
   }
 
   const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
@@ -323,7 +334,7 @@ function App() {
   const [hiderAnswerCode, setHiderAnswerCode] = useState("");
 
   const [radarPreset, setRadarPreset] = useState<RadarPreset>("1");
-  const [radarCustomKm, setRadarCustomKm] = useState(1);
+  const [radarCustomKmInput, setRadarCustomKmInput] = useState("0,2");
   const [thermoStart, setThermoStart] = useState<Position | null>(null);
   const [thermoEnd, setThermoEnd] = useState<Position | null>(null);
   const [thermoTracking, setThermoTracking] = useState<{
@@ -372,9 +383,13 @@ function App() {
 
   const selectedStop = useMemo(() => STOPS.find((stop) => stop.id === selectedStopId) || null, [selectedStopId]);
   const radarKm = useMemo(() => {
-    if (radarPreset === "custom") return Math.max(0.1, Number(radarCustomKm) || 0.1);
+    if (radarPreset === "custom") {
+      const parsed = parseLocaleNumber(radarCustomKmInput);
+      if (!Number.isFinite(parsed)) return 0.2;
+      return Math.max(0.05, parsed);
+    }
     return Number(radarPreset);
-  }, [radarCustomKm, radarPreset]);
+  }, [radarCustomKmInput, radarPreset]);
 
   useEffect(() => {
     if (!thermoTracking.active || !currentPos) return;
@@ -661,14 +676,14 @@ function App() {
                   </div>
                   {radarPreset === "custom" && (
                     <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={radarCustomKm}
-                      onChange={(e) => setRadarCustomKm(Number(e.target.value))}
+                      type="text"
+                      inputMode="decimal"
+                      value={radarCustomKmInput}
+                      onChange={(e) => setRadarCustomKmInput(e.target.value)}
+                      placeholder="z. B. 0,2"
                     />
                   )}
-                  <p className="meta small">Aktiv: {radarKm.toFixed(2)} km</p>
+                  <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
                   <button className="btn" onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
                 </div>
 
