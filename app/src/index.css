@@ -149,6 +149,12 @@ textarea {
   border-color: #9bb8d3;
 }
 
+.active-btn {
+  background: #dff0ff !important;
+  border-color: #4e82b3 !important;
+  color: #143c63 !important;
+}
+
 .warn {
   border: 1px solid #f7c38b;
   background: #fff8ef;

@@ -5,6 +5,7 @@ import { STOPS } from "./data/stops";
 type Role = "landing" | "hider" | "seeker";
 type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT";
 type MatchLevel = "bezirk" | "stadtbezirk";
+type RadarPreset = "0.25" | "0.5" | "1" | "2" | "custom";
 
 type QuestionCode = {
   qid: string;
@@ -290,6 +291,21 @@ function copyText(value: string): void {
   });
 }
 
+function notifySeeker(message: string): void {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    new Notification("Thermometer", { body: message });
+    return;
+  }
+  if (Notification.permission === "default") {
+    Notification.requestPermission().then((perm) => {
+      if (perm === "granted") {
+        new Notification("Thermometer", { body: message });
+      }
+    });
+  }
+}
+
 function renderType(type: QuestionType): string {
   if (type === "RADAR") return "Radar";
   if (type === "THERMO_PATH") return "Thermometer";
@@ -306,9 +322,16 @@ function App() {
   const [hiderFeedback, setHiderFeedback] = useState("");
   const [hiderAnswerCode, setHiderAnswerCode] = useState("");
 
-  const [radarKm, setRadarKm] = useState(2);
+  const [radarPreset, setRadarPreset] = useState<RadarPreset>("1");
+  const [radarCustomKm, setRadarCustomKm] = useState(1);
   const [thermoStart, setThermoStart] = useState<Position | null>(null);
   const [thermoEnd, setThermoEnd] = useState<Position | null>(null);
+  const [thermoTracking, setThermoTracking] = useState<{
+    active: boolean;
+    targetKm: number;
+    walkedKm: number;
+    lastPos: Position | null;
+  }>({ active: false, targetKm: 0.75, walkedKm: 0, lastPos: null });
   const [matchLevel, setMatchLevel] = useState<MatchLevel>("bezirk");
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
   const [latestQuestionCode, setLatestQuestionCode] = useState("");
@@ -348,6 +371,33 @@ function App() {
   }, [selectedStopId]);
 
   const selectedStop = useMemo(() => STOPS.find((stop) => stop.id === selectedStopId) || null, [selectedStopId]);
+  const radarKm = useMemo(() => {
+    if (radarPreset === "custom") return Math.max(0.1, Number(radarCustomKm) || 0.1);
+    return Number(radarPreset);
+  }, [radarCustomKm, radarPreset]);
+
+  useEffect(() => {
+    if (!thermoTracking.active || !currentPos) return;
+    if (!thermoTracking.lastPos) {
+      setThermoTracking((prev) => ({ ...prev, lastPos: currentPos }));
+      return;
+    }
+
+    const deltaKm = haversineKm(thermoTracking.lastPos, currentPos);
+    if (deltaKm < 0.005) return;
+
+    const nextWalked = thermoTracking.walkedKm + deltaKm;
+    if (nextWalked >= thermoTracking.targetKm) {
+      setThermoEnd(currentPos);
+      setThermoTracking((prev) => ({ ...prev, active: false, walkedKm: nextWalked, lastPos: currentPos }));
+      const doneMsg = `Ziel erreicht: ${thermoTracking.targetKm.toFixed(2)} km gelaufen. Endpunkt wurde gesetzt.`;
+      setAnswerFeedback(doneMsg);
+      notifySeeker(doneMsg);
+      return;
+    }
+
+    setThermoTracking((prev) => ({ ...prev, walkedKm: nextWalked, lastPos: currentPos }));
+  }, [currentPos, thermoTracking]);
 
   const filteredStops = useMemo(() => {
     const active = Object.values(appliedAnswers);
@@ -428,6 +478,28 @@ function App() {
     const code = encodeQuestionCode(question);
     setLatestQuestionCode(code);
     setAnswerFeedback(`${renderType(type)}-Code erstellt.`);
+  }
+
+  function startThermometer(targetKm: number): void {
+    if (!currentPos) {
+      setAnswerFeedback("Aktueller Standort fehlt. Bitte GPS freigeben.");
+      return;
+    }
+    setThermoStart(currentPos);
+    setThermoEnd(null);
+    setThermoTracking({
+      active: true,
+      targetKm,
+      walkedKm: 0,
+      lastPos: currentPos,
+    });
+    setAnswerFeedback(`Thermometer gestartet: laufe ${targetKm.toFixed(2)} km.`);
+  }
+
+  function resetThermometer(): void {
+    setThermoStart(null);
+    setThermoEnd(null);
+    setThermoTracking((prev) => ({ ...prev, active: false, walkedKm: 0, lastPos: null }));
   }
 
   function evaluateHiderCode(): void {
@@ -579,32 +651,51 @@ function App() {
 
                 <div className="card">
                   <h3>Radar</h3>
-                  <label>Radius (km)</label>
-                  <input
-                    type="number"
-                    min={0.2}
-                    step={0.1}
-                    value={radarKm}
-                    onChange={(e) => setRadarKm(Number(e.target.value))}
-                  />
+                  <label>Radius</label>
+                  <div className="split-buttons">
+                    <button className={`btn ghost ${radarPreset === "0.25" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.25")}>250 m</button>
+                    <button className={`btn ghost ${radarPreset === "0.5" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.5")}>500 m</button>
+                    <button className={`btn ghost ${radarPreset === "1" ? "active-btn" : ""}`} onClick={() => setRadarPreset("1")}>1 km</button>
+                    <button className={`btn ghost ${radarPreset === "2" ? "active-btn" : ""}`} onClick={() => setRadarPreset("2")}>2 km</button>
+                    <button className={`btn ghost ${radarPreset === "custom" ? "active-btn" : ""}`} onClick={() => setRadarPreset("custom")}>Custom</button>
+                  </div>
+                  {radarPreset === "custom" && (
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      value={radarCustomKm}
+                      onChange={(e) => setRadarCustomKm(Number(e.target.value))}
+                    />
+                  )}
+                  <p className="meta small">Aktiv: {radarKm.toFixed(2)} km</p>
                   <button className="btn" onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
                 </div>
 
                 <div className="card">
                   <h3>Thermometer</h3>
                   <div className="split-buttons">
-                    <button className="btn ghost" onClick={() => currentPos && setThermoStart(currentPos)}>
-                      Start = mein Standort
+                    <button className="btn ghost" onClick={() => startThermometer(0.75)}>
+                      Start 750 m
                     </button>
-                    <button className="btn ghost" onClick={() => currentPos && setThermoEnd(currentPos)}>
-                      Ziel = mein Standort
+                    <button className="btn ghost" onClick={() => startThermometer(1.5)}>
+                      Start 1,5 km
                     </button>
                   </div>
                   <p className="meta small">
                     Start: {thermoStart ? `${thermoStart.lat.toFixed(5)}, ${thermoStart.lon.toFixed(5)}` : "-"}
                     <br />
                     Ziel: {thermoEnd ? `${thermoEnd.lat.toFixed(5)}, ${thermoEnd.lon.toFixed(5)}` : "-"}
+                    <br />
+                    Status: {thermoTracking.active ? "Laeuft" : "Inaktiv"}
+                    {thermoTracking.active && (
+                      <>
+                        <br />
+                        Gelaufen: {thermoTracking.walkedKm.toFixed(2)} / {thermoTracking.targetKm.toFixed(2)} km
+                      </>
+                    )}
                   </p>
+                  <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
                   <button className="btn" onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
                 </div>
 
