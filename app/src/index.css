@@ -1,0 +1,182 @@
+:root {
+  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  line-height: 1.45;
+  color: #172435;
+  background: radial-gradient(circle at 10% 10%, #f4f9ff 0%, #edf4ff 35%, #eff7f4 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #173654;
+  color: #f8fbff;
+  box-shadow: 0 8px 24px rgba(23, 54, 84, 0.25);
+}
+
+.topbar h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pill {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.landing {
+  margin: auto;
+  width: min(760px, 92vw);
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #d6e4f2;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 18px 38px rgba(26, 45, 79, 0.12);
+}
+
+.landing-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: 370px 1fr;
+  min-height: calc(100vh - 58px);
+}
+
+.panel {
+  background: #f8fbff;
+  border-right: 1px solid #d9e8f5;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.panel h2 {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+}
+
+.meta {
+  margin: 0 0 12px;
+  color: #48627c;
+  font-size: 0.92rem;
+}
+
+.small {
+  font-size: 0.83rem;
+}
+
+.row,
+.card {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #d6e4f2;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.split-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+textarea,
+input,
+select {
+  width: 100%;
+  border: 1px solid #b8cde1;
+  border-radius: 8px;
+  padding: 8px;
+  font: inherit;
+  background: #fcfeff;
+}
+
+textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.btn {
+  border: 1px solid #123253;
+  border-radius: 9px;
+  background: #1b4d78;
+  color: #fff;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn.secondary {
+  background: #226f5d;
+  border-color: #1c5f50;
+}
+
+.btn.ghost {
+  background: #fff;
+  color: #15395b;
+  border-color: #9bb8d3;
+}
+
+.warn {
+  border: 1px solid #f7c38b;
+  background: #fff8ef;
+  color: #8a4b10;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.map-wrap {
+  min-height: 580px;
+}
+
+.map {
+  height: 100%;
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    border-right: none;
+    border-bottom: 1px solid #d9e8f5;
+  }
+
+  .map-wrap {
+    min-height: 60vh;
+  }
+}
