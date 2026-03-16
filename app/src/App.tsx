@@ -7,23 +7,15 @@ type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT";
 type MatchLevel = "bezirk" | "stadtbezirk";
 
 type QuestionCode = {
-  v: 1;
-  kind: "Q";
-  gameId: string;
   qid: string;
   type: QuestionType;
   payload: Record<string, unknown>;
-  ts: number;
 };
 
 type AnswerCode = {
-  v: 1;
-  kind: "A";
-  gameId: string;
   qid: string;
   type: QuestionType;
   answer: Record<string, unknown>;
-  ts: number;
 };
 
 type Position = { lat: number; lon: number };
@@ -98,45 +90,93 @@ const GROUP_MAP: Record<string, string> = {
 
 const EXCLUDED_DISTRICTS = new Set(["Sprakel", "Nienberge", "Roxel", "Albachten", "Amelsbüren", "Wolbeck"]);
 
-function randomId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
+function randomId(): string {
+  return Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
-function toBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let bin = "";
-  bytes.forEach((byte) => {
-    bin += String.fromCharCode(byte);
-  });
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+function formatCoord(value: number): string {
+  return value.toFixed(5);
 }
 
-function fromBase64Url(value: string): string {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-  const bin = atob(padded);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) {
-    bytes[i] = bin.charCodeAt(i);
-  }
-  return new TextDecoder().decode(bytes);
+function parseCoordPair(raw: string): [number, number] {
+  const parts = raw.split(";");
+  if (parts.length !== 2) throw new Error("Koordinaten fehlen.");
+  const lat = Number(parts[0]);
+  const lon = Number(parts[1]);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) throw new Error("Koordinaten ungültig.");
+  return [lat, lon];
 }
 
 function encodeQuestionCode(payload: QuestionCode): string {
-  return `HSQ1.${toBase64Url(JSON.stringify(payload))}`;
+  if (payload.type === "RADAR") {
+    const center = payload.payload.center as [number, number];
+    const radiusKm = Number(payload.payload.radiusKm);
+    return `RADAR_${payload.qid}_${formatCoord(center[0])};${formatCoord(center[1])};${radiusKm}km`;
+  }
+  if (payload.type === "THERMO_PATH") {
+    const start = payload.payload.start as [number, number];
+    const end = payload.payload.end as [number, number];
+    return `THERMO_${payload.qid}_${formatCoord(start[0])};${formatCoord(start[1])}_${formatCoord(end[0])};${formatCoord(end[1])}`;
+  }
+  const level = payload.payload.level as MatchLevel;
+  const ref = payload.payload.reference as [number, number];
+  return `MATCH_${payload.qid}_${level === "bezirk" ? "B" : "S"}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
 }
 
 function encodeAnswerCode(payload: AnswerCode): string {
-  return `HSA1.${toBase64Url(JSON.stringify(payload))}`;
+  if (payload.type === "RADAR") {
+    return `A_RADAR_${payload.qid}_${payload.answer.inside ? "JA" : "NEIN"}`;
+  }
+  if (payload.type === "THERMO_PATH") {
+    return `A_THERMO_${payload.qid}_${String(payload.answer.trend)}`;
+  }
+  return `A_MATCH_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
 }
 
 function decodeCode(raw: string): QuestionCode | AnswerCode {
-  if (raw.startsWith("HSQ1.")) {
-    return JSON.parse(fromBase64Url(raw.slice(5))) as QuestionCode;
+  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:\.\d+)?)km$/i);
+  if (radarQ) {
+    const center = parseCoordPair(radarQ[2]);
+    return { qid: radarQ[1].toUpperCase(), type: "RADAR", payload: { center, radiusKm: Number(radarQ[3]) } };
   }
-  if (raw.startsWith("HSA1.")) {
-    return JSON.parse(fromBase64Url(raw.slice(5))) as AnswerCode;
+
+  const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  if (thermoQ) {
+    return {
+      qid: thermoQ[1].toUpperCase(),
+      type: "THERMO_PATH",
+      payload: { start: parseCoordPair(thermoQ[2]), end: parseCoordPair(thermoQ[3]) },
+    };
   }
+
+  const matchQ = raw.match(/^MATCH_([A-Z0-9]{4})_(B|S)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  if (matchQ) {
+    return {
+      qid: matchQ[1].toUpperCase(),
+      type: "MATCH_DISTRICT",
+      payload: { level: matchQ[2].toUpperCase() === "B" ? "bezirk" : "stadtbezirk", reference: parseCoordPair(matchQ[3]) },
+    };
+  }
+
+  const radarA = raw.match(/^A_RADAR_([A-Z0-9]{4})_(JA|NEIN)$/i);
+  if (radarA) {
+    return { qid: radarA[1].toUpperCase(), type: "RADAR", answer: { inside: radarA[2].toUpperCase() === "JA" } };
+  }
+
+  const thermoA = raw.match(/^A_THERMO_([A-Z0-9]{4})_(WARMER|COLDER|SAME)$/i);
+  if (thermoA) {
+    return {
+      qid: thermoA[1].toUpperCase(),
+      type: "THERMO_PATH",
+      answer: { trend: thermoA[2].toUpperCase() as "WARMER" | "COLDER" | "SAME" },
+    };
+  }
+
+  const matchA = raw.match(/^A_MATCH_([A-Z0-9]{4})_(JA|NEIN)$/i);
+  if (matchA) {
+    return { qid: matchA[1].toUpperCase(), type: "MATCH_DISTRICT", answer: { match: matchA[2].toUpperCase() === "JA" } };
+  }
+
   throw new Error("Unbekanntes Code-Format");
 }
 
@@ -266,14 +306,6 @@ function App() {
   const [hiderFeedback, setHiderFeedback] = useState("");
   const [hiderAnswerCode, setHiderAnswerCode] = useState("");
 
-  const [gameId] = useState(() => {
-    const existing = localStorage.getItem("hs_game_id");
-    if (existing) return existing;
-    const next = Math.random().toString(36).slice(2, 8).toUpperCase();
-    localStorage.setItem("hs_game_id", next);
-    return next;
-  });
-
   const [radarKm, setRadarKm] = useState(2);
   const [thermoStart, setThermoStart] = useState<Position | null>(null);
   const [thermoEnd, setThermoEnd] = useState<Position | null>(null);
@@ -287,7 +319,7 @@ function App() {
   const { position: currentPos, accuracy, error: geolocationError } = useCurrentLocation();
 
   useEffect(() => {
-    fetch("/stadtteile-muenster.geojson")
+    fetch(`${import.meta.env.BASE_URL}stadtteile-muenster.geojson`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<unknown>;
@@ -297,7 +329,13 @@ function App() {
         setGeojson(collection);
       })
       .catch((err: Error) => {
-        setGeojsonError(err.message);
+        fetch("./stadtteile-muenster.geojson")
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json() as Promise<unknown>;
+          })
+          .then((res) => setGeojson(res as StadtteileCollection))
+          .catch(() => setGeojsonError(err.message));
       });
   }, []);
 
@@ -381,13 +419,9 @@ function App() {
     }
 
     const question: QuestionCode = {
-      v: 1,
-      kind: "Q",
-      gameId,
-      qid: randomId("q"),
+      qid: randomId(),
       type,
       payload,
-      ts: Date.now(),
     };
 
     setAskedCodes((prev) => ({ ...prev, [question.qid]: question }));
@@ -403,12 +437,8 @@ function App() {
         return;
       }
       const decoded = decodeCode(hiderInputCode.trim());
-      if (decoded.kind !== "Q") {
-        setHiderFeedback("Bitte einen Fragecode (HSQ1...) einfügen.");
-        return;
-      }
-      if (decoded.gameId !== gameId) {
-        setHiderFeedback("Game-ID passt nicht zu deiner Runde.");
+      if (!("payload" in decoded)) {
+        setHiderFeedback("Bitte einen Fragecode einfügen (RADAR_/THERMO_/MATCH_...).");
         return;
       }
 
@@ -447,13 +477,9 @@ function App() {
       }
 
       const answerCode: AnswerCode = {
-        v: 1,
-        kind: "A",
-        gameId,
         qid: decoded.qid,
         type: decoded.type,
         answer,
-        ts: Date.now(),
       };
 
       setHiderFeedback(feedback);
@@ -466,12 +492,8 @@ function App() {
   function applyAnswerCode(): void {
     try {
       const decoded = decodeCode(answerInput.trim());
-      if (decoded.kind !== "A") {
-        setAnswerFeedback("Bitte einen Antwortcode (HSA1...) einfügen.");
-        return;
-      }
-      if (decoded.gameId !== gameId) {
-        setAnswerFeedback("Game-ID stimmt nicht.");
+      if (!("answer" in decoded)) {
+        setAnswerFeedback("Bitte einen Antwortcode einfügen (A_RADAR_/A_THERMO_/A_MATCH_...).");
         return;
       }
       if (!askedCodes[decoded.qid]) {
@@ -492,7 +514,6 @@ function App() {
       <header className="topbar">
         <h1>Hide and Seek Munster</h1>
         <div className="topbar-right">
-          <span className="pill">Game: {gameId}</span>
           {role !== "landing" && (
             <button className="btn ghost" onClick={() => setRole("landing")}>
               Zur Landing Page
@@ -530,11 +551,11 @@ function App() {
 
                 <div className="row">
                   <label>Fragecode vom Sucher</label>
-                  <textarea
-                    value={hiderInputCode}
-                    onChange={(e) => setHiderInputCode(e.target.value)}
-                    placeholder="HSQ1..."
-                  />
+                    <textarea
+                      value={hiderInputCode}
+                      onChange={(e) => setHiderInputCode(e.target.value)}
+                      placeholder="RADAR_1A2B_51.96070;7.62610;2km"
+                    />
                 </div>
                 <button className="btn" onClick={evaluateHiderCode}>
                   Code auswerten
@@ -543,7 +564,7 @@ function App() {
 
                 <div className="row">
                   <label>Antwortcode fur WhatsApp</label>
-                  <textarea readOnly value={hiderAnswerCode} placeholder="HSA1..." />
+                  <textarea readOnly value={hiderAnswerCode} placeholder="A_RADAR_1A2B_JA" />
                   <button className="btn ghost" onClick={() => copyText(hiderAnswerCode)}>
                     Rauskopieren
                   </button>
@@ -608,7 +629,7 @@ function App() {
 
                 <div className="row">
                   <label>Antwortcode eintragen</label>
-                  <textarea value={answerInput} onChange={(e) => setAnswerInput(e.target.value)} placeholder="HSA1..." />
+                  <textarea value={answerInput} onChange={(e) => setAnswerInput(e.target.value)} placeholder="A_RADAR_1A2B_JA" />
                   <button className="btn" onClick={applyAnswerCode}>
                     Antwort anwenden
                   </button>
