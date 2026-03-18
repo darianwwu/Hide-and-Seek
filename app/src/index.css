@@ -172,6 +172,37 @@ textarea {
   width: 100%;
 }
 
+.map-center-control {
+  margin-top: 10px;
+  margin-right: 10px;
+}
+
+.map-center-btn {
+  width: 34px;
+  height: 34px;
+  background: #fff;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+  color: #333;
+  padding: 0;
+
+  &:hover {
+    background: #f4f4f4;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
 @media (max-width: 980px) {
   .game-layout {
     grid-template-columns: 1fr;

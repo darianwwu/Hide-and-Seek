@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import { STOPS } from "./data/stops";
 
@@ -289,11 +290,34 @@ function useCurrentLocation() {
 
 function RecenterOnPosition({ position }: { position: Position | null }) {
   const map = useMap();
+  const initialized = useRef(false);
   useEffect(() => {
-    if (!position) return;
+    if (!position || initialized.current) return;
+    initialized.current = true;
     map.setView([position.lat, position.lon], 14);
   }, [map, position]);
   return null;
+}
+
+function CenterButton({ position }: { position: Position | null }) {
+  const map = useMap();
+  const container = map.getContainer().querySelector<HTMLElement>(".leaflet-top.leaflet-right");
+  if (!container) return null;
+  return createPortal(
+    <div className="leaflet-control map-center-control">
+      <button
+        className="map-center-btn"
+        onClick={() => {
+          if (position) map.setView([position.lat, position.lon], 15);
+        }}
+        title="Zum Standort zentrieren"
+        disabled={!position}
+      >
+        &#x2316;
+      </button>
+    </div>,
+    container,
+  );
 }
 
 function copyText(value: string): void {
@@ -767,6 +791,7 @@ function App() {
               />
 
               <RecenterOnPosition position={currentPos} />
+              <CenterButton position={currentPos} />
 
               {displayedStops.map((stop) => {
                 const selected = stop.id === selectedStopId;
