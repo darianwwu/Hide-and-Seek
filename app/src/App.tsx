@@ -41,6 +41,7 @@ type StadtteileCollection = {
 };
 
 const MUNSTER_CENTER: Position = { lat: 51.9607, lon: 7.6261 };
+const HIDE_RADIUS_M = 400;
 
 const GROUP_MAP: Record<string, string> = {
   "11": "Mitte",
@@ -352,6 +353,7 @@ function App() {
   const [geojson, setGeojson] = useState<StadtteileCollection | null>(null);
   const [geojsonError, setGeojsonError] = useState<string>("");
   const [selectedStopId, setSelectedStopId] = useState<string>(() => localStorage.getItem("hs_hideout") || "");
+  const [previewStopId, setPreviewStopId] = useState<string>("");
 
   const [hiderInputCode, setHiderInputCode] = useState("");
   const [hiderFeedback, setHiderFeedback] = useState("");
@@ -793,6 +795,17 @@ function App() {
               <RecenterOnPosition position={currentPos} />
               <CenterButton position={currentPos} />
 
+              {(() => {
+                const previewStop = displayedStops.find((s) => s.id === previewStopId);
+                return previewStop ? (
+                  <Circle
+                    center={[previewStop.lat, previewStop.lon]}
+                    radius={HIDE_RADIUS_M}
+                    pathOptions={{ color: "#16a34a", weight: 1.5, fillColor: "#4ade80", fillOpacity: 0.12 }}
+                  />
+                ) : null;
+              })()}
+
               {displayedStops.map((stop) => {
                 const selected = stop.id === selectedStopId;
                 const seekerOut = role === "seeker" && !filteredStops.some((item) => item.id === stop.id);
@@ -808,13 +821,12 @@ function App() {
                       fillColor: seekerOut ? "#cbd5e1" : selected ? "#f59e0b" : "#dc2626",
                       fillOpacity: seekerOut ? 0.25 : 0.9,
                     }}
-                    eventHandlers={
-                      role === "hider"
-                        ? {
-                            click: () => setSelectedStopId(stop.id),
-                          }
-                        : undefined
-                    }
+                    eventHandlers={{
+                      click: () => {
+                        if (role === "hider") setSelectedStopId(stop.id);
+                        setPreviewStopId(stop.id);
+                      },
+                    }}
                   >
                     <Popup>
                       <b>{stop.name}</b>
