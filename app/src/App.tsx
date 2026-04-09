@@ -1285,6 +1285,17 @@ function App() {
                     Rauskopieren
                   </button>
                 </div>
+
+                <div className="card">
+                  <h3>Belohnungen &amp; Zeitlimits</h3>
+                  <ul className="foto-fragen-list">
+                    <li><strong>Radar</strong> — 2 Karten ziehen, 1 behalten · 3 min</li>
+                    <li><strong>Thermometer</strong> — 2 Karten ziehen, 1 behalten · 3 min</li>
+                    <li><strong>Matching</strong> — 3 Karten ziehen, 1 behalten · 3 min</li>
+                    <li><strong>Measuring</strong> — 3 Karten ziehen, 1 behalten · 3 min</li>
+                    <li><strong>Foto</strong> — 1 Karte ziehen, 1 behalten · 10 min</li>
+                  </ul>
+                </div>
               </>
             )}
 
@@ -1295,7 +1306,7 @@ function App() {
 
                 <div className="card">
                   <h3>Radar</h3>
-                  <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten</p>
+                  <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <label>Radius</label>
                   <div className="split-buttons">
                     <button className={`btn ghost ${radarPreset === "0.25" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.25")}>250 m</button>
@@ -1319,7 +1330,7 @@ function App() {
 
                 <div className="card">
                   <h3>Thermometer</h3>
-                  <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten</p>
+                  <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="split-buttons">
                     <button className="btn ghost" onClick={() => startThermometer(0.75)}>
                       Start 750 m
@@ -1347,7 +1358,7 @@ function App() {
 
                 <div className="card">
                   <h3>Matching Frage</h3>
-                  <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten</p>
+                  <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <select value={matchLevel} onChange={(e) => setMatchLevel(e.target.value as MatchLevel)}>
                     <option value="bezirk">Gleicher Bezirk?</option>
                     <option value="stadtbezirk">Gleicher Stadtbezirk?</option>
@@ -1385,7 +1396,7 @@ function App() {
 
                 <div className="card">
                   <h3>Measuring Frage</h3>
-                  <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten</p>
+                  <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <select value={selectedMeasureType} onChange={(e) => setSelectedMeasureType(e.target.value as MeasureType)}>
                     {MEASURE_TYPES.map((m) => (
                       <option key={m.id} value={m.id}>{m.label}</option>
@@ -1398,7 +1409,7 @@ function App() {
 
                 <div className="card">
                   <h3>Foto Frage</h3>
-                  <p className="meta small">Belohnung: 1 Karte ziehen, 1 behalten</p>
+                  <p className="meta small">Belohnung: 1 Karte ziehen, 1 behalten · Zeitlimit: 10 min</p>
                   <ul className="foto-fragen-list">
                     <li>Gebäude (sichtbar von der Bushaltestelle)</li>
                     <li>Breiteste Straße</li>
