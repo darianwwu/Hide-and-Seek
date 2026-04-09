@@ -1,10 +1,12 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
+import L from "leaflet";
 import { STOPS } from "./data/stops";
 
 type Role = "landing" | "hider" | "seeker";
-type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT";
+type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT" | "MATCH_POI" | "MATCH_BUSLINE" | "MATCH_STREET" | "MEASURE";
+type MeasureType = "kitas" | "schulen" | "sportstaetten" | "friedhoefe" | "kinos" | "krankenhaeuser" | "museen" | "buechereien" | "baeder" | "busline" | "street" | "border_bezirk" | "border_stadtbezirk";
 type MatchLevel = "bezirk" | "stadtbezirk";
 type RadarPreset = "0.25" | "0.5" | "1" | "2" | "custom";
 
@@ -42,6 +44,56 @@ type StadtteileCollection = {
 
 const MUNSTER_CENTER: Position = { lat: 51.9607, lon: 7.6261 };
 const HIDE_RADIUS_M = 400;
+
+type PoiFeature = {
+  type: "Feature";
+  properties: Record<string, unknown>;
+  geometry: { type: "Point"; coordinates: [number, number] };
+};
+
+type PoiCollection = {
+  type: "FeatureCollection";
+  features: PoiFeature[];
+};
+
+type PoiLayerConfig = {
+  id: string;
+  label: string;
+  file: string;
+  color: string;
+  nameKey: string;
+};
+
+type BusLineFeature = {
+  type: "Feature";
+  properties: { route_id: string; name: string; color: string; label_lat: number; label_lon: number };
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+};
+
+type BusLineCollection = {
+  type: "FeatureCollection";
+  features: BusLineFeature[];
+};
+
+const POI_LAYERS: PoiLayerConfig[] = [
+  { id: "kitas", label: "Kitas", file: "kitas_ms.geojson", color: "#e91e63", nameKey: "E_NAME" },
+  { id: "schulen", label: "Schulen", file: "schulen_ms.geojson", color: "#9c27b0", nameKey: "NAME" },
+  { id: "sportstaetten", label: "Sportstätten", file: "sportstaetten.geojson", color: "#4caf50", nameKey: "Name" },
+  { id: "friedhoefe", label: "Friedhöfe", file: "friedhoefe.geojson", color: "#607d8b", nameKey: "NAME" },
+  { id: "kinos", label: "Kinos", file: "kinos.geojson", color: "#ff9800", nameKey: "NAME" },
+  { id: "krankenhaeuser", label: "Krankenhäuser", file: "krankenhaeuser.geojson", color: "#f44336", nameKey: "NAME" },
+  { id: "museen", label: "Museen", file: "museen.geojson", color: "#3f51b5", nameKey: "NAME" },
+  { id: "buechereien", label: "Büchereien", file: "buechereien.geojson", color: "#00bcd4", nameKey: "NAME" },
+  { id: "baeder", label: "Bäder", file: "baeder.geojson", color: "#2196f3", nameKey: "NAME" },
+];
+
+const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
+  ...POI_LAYERS.map((l) => ({ id: l.id as MeasureType, label: l.label })),
+  { id: "busline", label: "Buslinie" },
+  { id: "street", label: "Straße" },
+  { id: "border_bezirk", label: "Bezirksgrenze" },
+  { id: "border_stadtbezirk", label: "Stadtbezirksgrenze" },
+];
 
 const GROUP_MAP: Record<string, string> = {
   "11": "Mitte",
@@ -132,9 +184,32 @@ function encodeQuestionCode(payload: QuestionCode): string {
     const end = payload.payload.end as [number, number];
     return `THERMO_${payload.qid}_${formatCoord(start[0])};${formatCoord(start[1])}_${formatCoord(end[0])};${formatCoord(end[1])}`;
   }
-  const level = payload.payload.level as MatchLevel;
+  if (payload.type === "MATCH_DISTRICT") {
+    const level = payload.payload.level as MatchLevel;
+    const ref = payload.payload.reference as [number, number];
+    return `MATCH_${payload.qid}_${level === "bezirk" ? "B" : "S"}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
+  }
+  if (payload.type === "MATCH_POI") {
+    const poiType = payload.payload.poiType as string;
+    const ref = payload.payload.reference as [number, number];
+    const nearest = payload.payload.nearestName as string;
+    return `MPOI_${payload.qid}_${poiType}_${formatCoord(ref[0])};${formatCoord(ref[1])}_${nearest}`;
+  }
+  if (payload.type === "MATCH_BUSLINE") {
+    const lineName = payload.payload.lineName as string;
+    const ref = payload.payload.reference as [number, number];
+    return `MBUS_${payload.qid}_${lineName}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
+  }
+  if (payload.type === "MEASURE") {
+    const measureType = payload.payload.measureType as string;
+    const distKm = Number(payload.payload.distKm);
+    const ref = payload.payload.reference as [number, number];
+    return `MEAS_${payload.qid}_${measureType}_${formatKmLocale(distKm)}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
+  }
+  // MATCH_STREET
+  const street = payload.payload.street as string;
   const ref = payload.payload.reference as [number, number];
-  return `MATCH_${payload.qid}_${level === "bezirk" ? "B" : "S"}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
+  return `MSTR_${payload.qid}_${formatCoord(ref[0])};${formatCoord(ref[1])}_${street}`;
 }
 
 function encodeAnswerCode(payload: AnswerCode): string {
@@ -144,7 +219,19 @@ function encodeAnswerCode(payload: AnswerCode): string {
   if (payload.type === "THERMO_PATH") {
     return `A_THERMO_${payload.qid}_${String(payload.answer.trend)}`;
   }
-  return `A_MATCH_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
+  if (payload.type === "MATCH_DISTRICT") {
+    return `A_MATCH_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
+  }
+  if (payload.type === "MATCH_POI") {
+    return `A_MPOI_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
+  }
+  if (payload.type === "MATCH_BUSLINE") {
+    return `A_MBUS_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
+  }
+  if (payload.type === "MEASURE") {
+    return `A_MEAS_${payload.qid}_${String(payload.answer.result)}`;
+  }
+  return `A_MSTR_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
 }
 
 function decodeCode(raw: string): QuestionCode | AnswerCode {
@@ -191,7 +278,115 @@ function decodeCode(raw: string): QuestionCode | AnswerCode {
     return { qid: matchA[1].toUpperCase(), type: "MATCH_DISTRICT", answer: { match: matchA[2].toUpperCase() === "JA" } };
   }
 
+  const mpoiQ = raw.match(/^MPOI_([A-Z0-9]{4})_([a-z]+)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(.+)$/i);
+  if (mpoiQ) {
+    return {
+      qid: mpoiQ[1].toUpperCase(),
+      type: "MATCH_POI",
+      payload: { poiType: mpoiQ[2], reference: parseCoordPair(mpoiQ[3]), nearestName: mpoiQ[4] },
+    };
+  }
+
+  const mpoiA = raw.match(/^A_MPOI_([A-Z0-9]{4})_(JA|NEIN)$/i);
+  if (mpoiA) {
+    return { qid: mpoiA[1].toUpperCase(), type: "MATCH_POI", answer: { match: mpoiA[2].toUpperCase() === "JA" } };
+  }
+
+  const mbusQ = raw.match(/^MBUS_([A-Z0-9]{4})_(.+?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  if (mbusQ) {
+    return {
+      qid: mbusQ[1].toUpperCase(),
+      type: "MATCH_BUSLINE",
+      payload: { lineName: mbusQ[2], reference: parseCoordPair(mbusQ[3]) },
+    };
+  }
+
+  const mbusA = raw.match(/^A_MBUS_([A-Z0-9]{4})_(JA|NEIN)$/i);
+  if (mbusA) {
+    return { qid: mbusA[1].toUpperCase(), type: "MATCH_BUSLINE", answer: { match: mbusA[2].toUpperCase() === "JA" } };
+  }
+
+  const mstrQ = raw.match(/^MSTR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(.+)$/i);
+  if (mstrQ) {
+    return {
+      qid: mstrQ[1].toUpperCase(),
+      type: "MATCH_STREET",
+      payload: { reference: parseCoordPair(mstrQ[2]), street: mstrQ[3] },
+    };
+  }
+
+  const mstrA = raw.match(/^A_MSTR_([A-Z0-9]{4})_(JA|NEIN)$/i);
+  if (mstrA) {
+    return { qid: mstrA[1].toUpperCase(), type: "MATCH_STREET", answer: { match: mstrA[2].toUpperCase() === "JA" } };
+  }
+
+  const measQ = raw.match(/^MEAS_([A-Z0-9]{4})_([a-z_]+)_(\d+(?:[\.,]\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  if (measQ) {
+    return {
+      qid: measQ[1].toUpperCase(),
+      type: "MEASURE",
+      payload: { measureType: measQ[2], distKm: parseLocaleNumber(measQ[3]), reference: parseCoordPair(measQ[4]) },
+    };
+  }
+
+  const measA = raw.match(/^A_MEAS_([A-Z0-9]{4})_(CLOSER|FURTHER)$/i);
+  if (measA) {
+    return { qid: measA[1].toUpperCase(), type: "MEASURE", answer: { result: measA[2].toUpperCase() as "CLOSER" | "FURTHER" } };
+  }
+
   throw new Error("Unbekanntes Code-Format");
+}
+
+function distToSegment(p: Position, a: [number, number], b: [number, number]): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  if (dx === 0 && dy === 0) return haversineKm(p, { lat: a[1], lon: a[0] });
+  let t = ((p.lon - a[0]) * dx + (p.lat - a[1]) * dy) / (dx * dx + dy * dy);
+  t = Math.max(0, Math.min(1, t));
+  return haversineKm(p, { lat: a[1] + t * dy, lon: a[0] + t * dx });
+}
+
+function findNearestBusLines(pos: Position, busLines: BusLineCollection): { name: string; dist: number }[] {
+  const results: { name: string; dist: number }[] = [];
+  for (const feature of busLines.features) {
+    const coords = feature.geometry.coordinates;
+    let minDist = Infinity;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const d = distToSegment(pos, coords[i], coords[i + 1]);
+      if (d < minDist) minDist = d;
+    }
+    results.push({ name: feature.properties.name, dist: minDist });
+  }
+  results.sort((a, b) => a.dist - b.dist);
+  if (results.length === 0) return [];
+  const threshold = results[0].dist + 0.05;
+  return results.filter((r) => r.dist <= threshold);
+}
+
+async function reverseGeocodeStreet(pos: Position): Promise<string | null> {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${pos.lat}&lon=${pos.lon}&format=json&zoom=17`;
+  const res = await fetch(url, { headers: { "Accept-Language": "de" } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.address?.road ?? data?.address?.pedestrian ?? data?.address?.footway ?? data?.address?.path ?? null;
+}
+
+function findNearestPoi(pos: Position, features: PoiFeature[]): { name: string; dist: number } | null {
+  if (!features.length) return null;
+  let best: { name: string; dist: number } | null = null;
+  for (const f of features) {
+    const [lon, lat] = f.geometry.coordinates;
+    const d = haversineKm(pos, { lat, lon });
+    if (!best || d < best.dist) {
+      const keys = ["E_NAME", "NAME", "Name"];
+      let name = "";
+      for (const k of keys) {
+        if (f.properties[k]) { name = String(f.properties[k]); break; }
+      }
+      best = { name, dist: d };
+    }
+  }
+  return best;
 }
 
 function haversineKm(a: Position, b: Position): number {
@@ -259,6 +454,166 @@ function findDistrictLabel(
   return bezirkForFeature(feature);
 }
 
+function distPointToRing(pos: Position, ring: number[][]): number {
+  let minDist = Infinity;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const a: [number, number] = [ring[i][0], ring[i][1]];
+    const b: [number, number] = [ring[i + 1][0], ring[i + 1][1]];
+    const d = distToSegment(pos, a, b);
+    if (d < minDist) minDist = d;
+  }
+  return minDist;
+}
+
+function distToNearestBorder(
+  pos: Position,
+  geojson: StadtteileCollection | null,
+  level: "bezirk" | "stadtbezirk",
+): number {
+  if (!geojson) return Infinity;
+
+  if (level === "stadtbezirk") {
+    let minDist = Infinity;
+    for (const feature of geojson.features) {
+      const geom = feature.geometry;
+      const rings: number[][][] = geom.type === "Polygon"
+        ? (geom.coordinates as number[][][])
+        : (geom.coordinates as number[][][][]).flat();
+      for (const ring of rings) {
+        const d = distPointToRing(pos, ring);
+        if (d < minDist) minDist = d;
+      }
+    }
+    return minDist;
+  }
+
+  // bezirk: group features by bezirk name, merge rings per group, find min dist across all group boundaries
+  const groups: Record<string, number[][][]> = {};
+  for (const feature of geojson.features) {
+    const name = bezirkForFeature(feature);
+    if (!name) continue;
+    if (!groups[name]) groups[name] = [];
+    const geom = feature.geometry;
+    const rings: number[][][] = geom.type === "Polygon"
+      ? (geom.coordinates as number[][][])
+      : (geom.coordinates as number[][][][]).flat();
+    groups[name].push(...rings);
+  }
+
+  let minDist = Infinity;
+  for (const rings of Object.values(groups)) {
+    for (const ring of rings) {
+      const d = distPointToRing(pos, ring);
+      if (d < minDist) minDist = d;
+    }
+  }
+  return minDist;
+}
+
+function isPointExcludedByAnswer(
+  pos: Position,
+  question: QuestionCode,
+  answerCode: AnswerCode,
+  geojson: StadtteileCollection | null,
+  poiData: Record<string, PoiCollection>,
+  busLines: BusLineCollection | null,
+): boolean {
+  if (question.type === "RADAR") {
+    const center = question.payload.center as [number, number];
+    const radiusKm = Number(question.payload.radiusKm);
+    const dist = haversineKm(pos, { lat: center[0], lon: center[1] });
+    const inside = Boolean(answerCode.answer.inside);
+    return inside ? dist > radiusKm : dist <= radiusKm;
+  }
+
+  if (question.type === "THERMO_PATH") {
+    const start = question.payload.start as [number, number];
+    const end = question.payload.end as [number, number];
+    const d1 = haversineKm(pos, { lat: start[0], lon: start[1] });
+    const d2 = haversineKm(pos, { lat: end[0], lon: end[1] });
+    const trend = answerCode.answer.trend as string;
+    if (trend === "WARMER") return d2 >= d1;
+    if (trend === "COLDER") return d2 <= d1;
+    return false;
+  }
+
+  if (question.type === "MATCH_DISTRICT") {
+    const level = question.payload.level as MatchLevel;
+    const refPoint = question.payload.reference as [number, number];
+    const posLabel = findDistrictLabel(pos, geojson, level);
+    const refLabel = findDistrictLabel({ lat: refPoint[0], lon: refPoint[1] }, geojson, level);
+    const match = Boolean(answerCode.answer.match);
+    const isSame = posLabel !== null && posLabel === refLabel;
+    return match ? !isSame : isSame;
+  }
+
+  if (question.type === "MATCH_POI") {
+    const poiType = question.payload.poiType as string;
+    const seekerNearest = question.payload.nearestName as string;
+    const layerData = poiData[poiType];
+    if (!layerData) return false;
+    const posNearest = findNearestPoi(pos, layerData.features);
+    if (!posNearest) return false;
+    const isSame = posNearest.name === seekerNearest;
+    const match = Boolean(answerCode.answer.match);
+    return match ? !isSame : isSame;
+  }
+
+  if (question.type === "MATCH_BUSLINE") {
+    const seekerLine = question.payload.lineName as string;
+    if (!busLines) return false;
+    const nearestLines = findNearestBusLines(pos, busLines);
+    const hasLine = nearestLines.some((l) => l.name === seekerLine);
+    const match = Boolean(answerCode.answer.match);
+    return match ? !hasLine : hasLine;
+  }
+
+  if (question.type === "MEASURE") {
+    const mt = question.payload.measureType as MeasureType;
+    const seekerDist = Number(question.payload.distKm);
+    const result = answerCode.answer.result as "CLOSER" | "FURTHER";
+    let posDist: number | null = null;
+
+    if (mt === "busline") {
+      if (!busLines) return false;
+      const nearest = findNearestBusLines(pos, busLines);
+      posDist = nearest.length > 0 ? nearest[0].dist : null;
+    } else if (mt === "street") {
+      return false;
+    } else if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
+      const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
+      posDist = distToNearestBorder(pos, geojson, level);
+      if (!Number.isFinite(posDist)) return false;
+    } else {
+      const layerData = poiData[mt];
+      if (!layerData) return false;
+      const nearest = findNearestPoi(pos, layerData.features);
+      posDist = nearest ? nearest.dist : null;
+    }
+
+    if (posDist === null) return false;
+    return result === "CLOSER" ? posDist >= seekerDist : posDist <= seekerDist;
+  }
+
+  return false;
+}
+
+function isPointExcluded(
+  pos: Position,
+  answers: AnswerCode[],
+  questions: Record<string, QuestionCode>,
+  geojson: StadtteileCollection | null,
+  poiData: Record<string, PoiCollection>,
+  busLines: BusLineCollection | null,
+): boolean {
+  for (const a of answers) {
+    const q = questions[a.qid];
+    if (!q) continue;
+    if (isPointExcludedByAnswer(pos, q, a, geojson, poiData, busLines)) return true;
+  }
+  return false;
+}
+
 function useCurrentLocation() {
   const [position, setPosition] = useState<Position | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
@@ -321,6 +676,74 @@ function CenterButton({ position }: { position: Position | null }) {
   );
 }
 
+function ExclusionOverlay({
+  answers,
+  questions,
+  geojson,
+  poiData,
+  busLines,
+}: {
+  answers: AnswerCode[];
+  questions: Record<string, QuestionCode>;
+  geojson: StadtteileCollection | null;
+  poiData: Record<string, PoiCollection>;
+  busLines: BusLineCollection | null;
+}) {
+  const map = useMap();
+  const layerRef = useRef<L.GridLayer | null>(null);
+
+  useEffect(() => {
+    if (layerRef.current) {
+      map.removeLayer(layerRef.current);
+      layerRef.current = null;
+    }
+
+    if (answers.length === 0) return;
+
+    const ExclusionGrid = L.GridLayer.extend({
+      createTile(coords: L.Coords) {
+        const tile = document.createElement("canvas");
+        const size = this.getTileSize();
+        tile.width = size.x;
+        tile.height = size.y;
+
+        const ctx = tile.getContext("2d");
+        if (!ctx) return tile;
+
+        const step = 4;
+        ctx.fillStyle = "rgba(50, 50, 50, 0.45)";
+
+        for (let x = 0; x < size.x; x += step) {
+          for (let y = 0; y < size.y; y += step) {
+            const point = L.point(coords.x * size.x + x, coords.y * size.y + y);
+            const latlng = map.unproject(point, coords.z);
+            const pos: Position = { lat: latlng.lat, lon: latlng.lng };
+
+            if (isPointExcluded(pos, answers, questions, geojson, poiData, busLines)) {
+              ctx.fillRect(x, y, step, step);
+            }
+          }
+        }
+
+        return tile;
+      },
+    });
+
+    const layer = new ExclusionGrid() as L.GridLayer;
+    layer.addTo(map);
+    layerRef.current = layer;
+
+    return () => {
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current);
+        layerRef.current = null;
+      }
+    };
+  }, [answers, questions, geojson, poiData, busLines, map]);
+
+  return null;
+}
+
 function copyText(value: string): void {
   navigator.clipboard.writeText(value).catch(() => {
     // ignore on unsupported clipboard
@@ -345,6 +768,10 @@ function notifySeeker(message: string): void {
 function renderType(type: QuestionType): string {
   if (type === "RADAR") return "Radar";
   if (type === "THERMO_PATH") return "Thermometer";
+  if (type === "MATCH_POI") return "POI-Matching";
+  if (type === "MATCH_BUSLINE") return "Buslinien-Matching";
+  if (type === "MATCH_STREET") return "Straßen-Matching";
+  if (type === "MEASURE") return "Measuring";
   return "Matching Frage";
 }
 
@@ -370,13 +797,43 @@ function App() {
     lastPos: Position | null;
   }>({ active: false, targetKm: 0.75, walkedKm: 0, lastPos: null });
   const [matchLevel, setMatchLevel] = useState<MatchLevel>("bezirk");
+  const [selectedPoiType, setSelectedPoiType] = useState<string>(POI_LAYERS[0].id);
+  const [selectedBusLine, setSelectedBusLine] = useState<string>("");
+  const [selectedMeasureType, setSelectedMeasureType] = useState<MeasureType>("kitas");
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
   const [latestQuestionCode, setLatestQuestionCode] = useState("");
   const [answerInput, setAnswerInput] = useState("");
   const [answerFeedback, setAnswerFeedback] = useState("");
   const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>({});
 
+  const [poiData, setPoiData] = useState<Record<string, PoiCollection>>({});
+  const [poiVisible, setPoiVisible] = useState<Record<string, boolean>>(() => Object.fromEntries(POI_LAYERS.map((l) => [l.id, false])));
+  const [poiMenuOpen, setPoiMenuOpen] = useState(false);
+  const [busLines, setBusLines] = useState<BusLineCollection | null>(null);
+  const [busLinesVisible, setBusLinesVisible] = useState(false);
+  const [busLegendOpen, setBusLegendOpen] = useState(false);
+
   const { position: currentPos, accuracy, error: geolocationError } = useCurrentLocation();
+
+  useEffect(() => {
+    POI_LAYERS.forEach((layer) => {
+      fetch(`${import.meta.env.BASE_URL}pois/${layer.file}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json() as Promise<PoiCollection>;
+        })
+        .then((data) => setPoiData((prev) => ({ ...prev, [layer.id]: data })))
+        .catch(() => { /* silently skip unavailable layers */ });
+    });
+
+    fetch(`${import.meta.env.BASE_URL}pois/buslinien.geojson`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<BusLineCollection>;
+      })
+      .then((data) => setBusLines(data))
+      .catch(() => { /* silently skip */ });
+  }, []);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}stadtteile-muenster.geojson`)
@@ -440,46 +897,41 @@ function App() {
     setThermoTracking((prev) => ({ ...prev, walkedKm: nextWalked, lastPos: currentPos }));
   }, [currentPos, thermoTracking]);
 
+  const activeAnswers = useMemo(() => Object.values(appliedAnswers), [appliedAnswers]);
+
   const filteredStops = useMemo(() => {
-    const active = Object.values(appliedAnswers);
-    if (active.length === 0) return STOPS;
+    if (activeAnswers.length === 0) return STOPS;
+
+    // For each stop, sample 17 points (center + 8 on 400m ring + 8 on 200m ring).
+    // If ALL sample points are excluded, the stop is filtered out.
+    const HIDE_RADIUS_KM = HIDE_RADIUS_M / 1000;
+    const SAMPLE_ANGLES = 8;
+
+    function samplePoints(center: Position, radiusKm: number): Position[] {
+      const points: Position[] = [center];
+      const latPerKm = 1 / 111.32;
+      const lonPerKm = 1 / (111.32 * Math.cos((center.lat * Math.PI) / 180));
+      for (const r of [radiusKm, radiusKm / 2]) {
+        for (let i = 0; i < SAMPLE_ANGLES; i++) {
+          const angle = (2 * Math.PI * i) / SAMPLE_ANGLES;
+          points.push({
+            lat: center.lat + Math.sin(angle) * r * latPerKm,
+            lon: center.lon + Math.cos(angle) * r * lonPerKm,
+          });
+        }
+      }
+      return points;
+    }
 
     return STOPS.filter((stop) => {
-      return active.every((answerCode) => {
-        const question = askedCodes[answerCode.qid];
-        if (!question) return true;
-
-        if (question.type === "RADAR") {
-          const center = question.payload.center as [number, number];
-          const radiusKm = Number(question.payload.radiusKm);
-          const inside = Boolean(answerCode.answer.inside);
-          const isInside = haversineKm({ lat: stop.lat, lon: stop.lon }, { lat: center[0], lon: center[1] }) <= radiusKm;
-          return inside ? isInside : !isInside;
-        }
-
-        if (question.type === "THERMO_PATH") {
-          const start = question.payload.start as [number, number];
-          const end = question.payload.end as [number, number];
-          const d1 = haversineKm({ lat: stop.lat, lon: stop.lon }, { lat: start[0], lon: start[1] });
-          const d2 = haversineKm({ lat: stop.lat, lon: stop.lon }, { lat: end[0], lon: end[1] });
-          let trend: "WARMER" | "COLDER" | "SAME" = "SAME";
-          if (d2 < d1 - 0.02) trend = "WARMER";
-          else if (d2 > d1 + 0.02) trend = "COLDER";
-          return trend === answerCode.answer.trend;
-        }
-
-        const level = question.payload.level as MatchLevel;
-        const refPoint = question.payload.reference as [number, number];
-        const stopValue = findDistrictLabel({ lat: stop.lat, lon: stop.lon }, geojson, level);
-        const refValue = findDistrictLabel({ lat: refPoint[0], lon: refPoint[1] }, geojson, level);
-        if (!stopValue || !refValue) return false;
-        const match = stopValue === refValue;
-        return match === Boolean(answerCode.answer.match);
-      });
+      const samples = samplePoints({ lat: stop.lat, lon: stop.lon }, HIDE_RADIUS_KM);
+      return !samples.every((pt) =>
+        isPointExcluded(pt, activeAnswers, askedCodes, geojson, poiData, busLines),
+      );
     });
-  }, [appliedAnswers, askedCodes, geojson]);
+  }, [activeAnswers, askedCodes, geojson, poiData, busLines]);
 
-  function generateQuestion(type: QuestionType): void {
+  async function generateQuestion(type: QuestionType): Promise<void> {
     if (!currentPos) return;
 
     let payload: Record<string, unknown> = {};
@@ -505,6 +957,83 @@ function App() {
     if (type === "MATCH_DISTRICT") {
       payload = {
         level: matchLevel,
+        reference: [currentPos.lat, currentPos.lon],
+      };
+    }
+
+    if (type === "MATCH_POI") {
+      const layerData = poiData[selectedPoiType];
+      if (!layerData) {
+        setAnswerFeedback("POI-Daten noch nicht geladen.");
+        return;
+      }
+      const nearest = findNearestPoi(currentPos, layerData.features);
+      if (!nearest) {
+        setAnswerFeedback("Keine POIs gefunden.");
+        return;
+      }
+      payload = {
+        poiType: selectedPoiType,
+        reference: [currentPos.lat, currentPos.lon],
+        nearestName: nearest.name,
+      };
+    }
+
+    if (type === "MATCH_BUSLINE") {
+      if (!selectedBusLine) {
+        setAnswerFeedback("Bitte eine Buslinie auswählen.");
+        return;
+      }
+      payload = {
+        lineName: selectedBusLine,
+        reference: [currentPos.lat, currentPos.lon],
+      };
+    }
+
+    if (type === "MATCH_STREET") {
+      setAnswerFeedback("Straße wird ermittelt...");
+      const street = await reverseGeocodeStreet(currentPos);
+      if (!street) {
+        setAnswerFeedback("Straße konnte nicht ermittelt werden.");
+        return;
+      }
+      payload = {
+        reference: [currentPos.lat, currentPos.lon],
+        street,
+      };
+    }
+
+    if (type === "MEASURE") {
+      const mt = selectedMeasureType;
+      let distKm: number | null = null;
+
+      if (mt === "busline") {
+        if (!busLines) { setAnswerFeedback("Buslinien-Daten nicht geladen."); return; }
+        const nearest = findNearestBusLines(currentPos, busLines);
+        distKm = nearest.length > 0 ? nearest[0].dist : null;
+      } else if (mt === "street") {
+        setAnswerFeedback("Straßenabstand wird ermittelt...");
+        const street = await reverseGeocodeStreet(currentPos);
+        if (!street) { setAnswerFeedback("Straße konnte nicht ermittelt werden."); return; }
+        // For street we use 0 as "on this street" — distance is conceptually 0 at your position
+        distKm = 0;
+      } else if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
+        const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
+        distKm = distToNearestBorder(currentPos, geojson, level);
+        if (!Number.isFinite(distKm)) { setAnswerFeedback("Grenzabstand konnte nicht berechnet werden."); return; }
+      } else {
+        // POI type
+        const layerData = poiData[mt];
+        if (!layerData) { setAnswerFeedback("POI-Daten noch nicht geladen."); return; }
+        const nearest = findNearestPoi(currentPos, layerData.features);
+        if (!nearest) { setAnswerFeedback("Keine POIs gefunden."); return; }
+        distKm = nearest.dist;
+      }
+
+      if (distKm === null) { setAnswerFeedback("Abstand konnte nicht berechnet werden."); return; }
+      payload = {
+        measureType: mt,
+        distKm,
         reference: [currentPos.lat, currentPos.lon],
       };
     }
@@ -543,10 +1072,10 @@ function App() {
     setThermoTracking((prev) => ({ ...prev, active: false, walkedKm: 0, lastPos: null }));
   }
 
-  function evaluateHiderCode(): void {
+  async function evaluateHiderCode(): Promise<void> {
     try {
-      if (!selectedStop) {
-        setHiderFeedback("Bitte zuerst eine Haltestelle als Versteck wählen.");
+      if (!currentPos) {
+        setHiderFeedback("Standort wird benötigt – GPS freigeben.");
         return;
       }
       const decoded = decodeCode(hiderInputCode.trim());
@@ -555,14 +1084,14 @@ function App() {
         return;
       }
 
-      const hideout = { lat: selectedStop.lat, lon: selectedStop.lon };
+      const realPos = currentPos;
       let answer: Record<string, unknown> = {};
       let feedback = "";
 
       if (decoded.type === "RADAR") {
         const center = decoded.payload.center as [number, number];
         const radiusKm = Number(decoded.payload.radiusKm);
-        const inside = haversineKm(hideout, { lat: center[0], lon: center[1] }) <= radiusKm;
+        const inside = haversineKm(realPos, { lat: center[0], lon: center[1] }) <= radiusKm;
         answer = { inside };
         feedback = inside ? "Radar: JA, im Umkreis." : "Radar: NEIN, außerhalb.";
       }
@@ -570,8 +1099,8 @@ function App() {
       if (decoded.type === "THERMO_PATH") {
         const start = decoded.payload.start as [number, number];
         const end = decoded.payload.end as [number, number];
-        const d1 = haversineKm(hideout, { lat: start[0], lon: start[1] });
-        const d2 = haversineKm(hideout, { lat: end[0], lon: end[1] });
+        const d1 = haversineKm(realPos, { lat: start[0], lon: start[1] });
+        const d2 = haversineKm(realPos, { lat: end[0], lon: end[1] });
         let trend: "WARMER" | "COLDER" | "SAME" = "SAME";
         if (d2 < d1 - 0.02) trend = "WARMER";
         else if (d2 > d1 + 0.02) trend = "COLDER";
@@ -582,11 +1111,85 @@ function App() {
       if (decoded.type === "MATCH_DISTRICT") {
         const level = decoded.payload.level as MatchLevel;
         const reference = decoded.payload.reference as [number, number];
-        const hideoutLabel = findDistrictLabel(hideout, geojson, level);
+        const hiderLabel = findDistrictLabel(realPos, geojson, level);
         const refLabel = findDistrictLabel({ lat: reference[0], lon: reference[1] }, geojson, level);
-        const match = Boolean(hideoutLabel && refLabel && hideoutLabel === refLabel);
+        const match = Boolean(hiderLabel && refLabel && hiderLabel === refLabel);
         answer = { match };
         feedback = match ? "Matching: JA" : "Matching: NEIN";
+      }
+
+      if (decoded.type === "MATCH_POI") {
+        const poiType = decoded.payload.poiType as string;
+        const seekerNearest = decoded.payload.nearestName as string;
+        const layerData = poiData[poiType];
+        if (!layerData) {
+          setHiderFeedback(`POI-Daten für "${poiType}" nicht geladen.`);
+          return;
+        }
+        const hiderNearest = findNearestPoi(realPos, layerData.features);
+        const match = Boolean(hiderNearest && hiderNearest.name === seekerNearest);
+        answer = { match };
+        const poiLabel = POI_LAYERS.find((l) => l.id === poiType)?.label ?? poiType;
+        feedback = match
+          ? `POI-Matching (${poiLabel}): JA – gleicher nächster POI (${seekerNearest})`
+          : `POI-Matching (${poiLabel}): NEIN – dein nächster: ${hiderNearest?.name ?? "?"}, Sucher: ${seekerNearest}`;
+      }
+
+      if (decoded.type === "MATCH_BUSLINE") {
+        const seekerLine = decoded.payload.lineName as string;
+        if (!busLines) {
+          setHiderFeedback("Buslinien-Daten nicht geladen.");
+          return;
+        }
+        const nearestLines = findNearestBusLines(realPos, busLines);
+        const lineNames = nearestLines.map((l) => l.name);
+        const match = lineNames.includes(seekerLine);
+        answer = { match };
+        feedback = match
+          ? `Buslinien-Matching: JA – Linie ${seekerLine} gehört zu deinen nächsten (${lineNames.join(", ")})`
+          : `Buslinien-Matching: NEIN – deine nächsten: ${lineNames.join(", ") || "keine"}, Sucher: ${seekerLine}`;
+      }
+
+      if (decoded.type === "MATCH_STREET") {
+        setHiderFeedback("Straße wird ermittelt...");
+        const seekerStreet = decoded.payload.street as string;
+        const hiderStreet = await reverseGeocodeStreet(realPos);
+        const match = Boolean(hiderStreet && hiderStreet === seekerStreet);
+        answer = { match };
+        feedback = match
+          ? `Straßen-Matching: JA – gleiche Straße (${seekerStreet})`
+          : `Straßen-Matching: NEIN – deine Straße: ${hiderStreet ?? "?"}, Sucher: ${seekerStreet}`;
+      }
+
+      if (decoded.type === "MEASURE") {
+        const mt = decoded.payload.measureType as MeasureType;
+        const seekerDist = Number(decoded.payload.distKm);
+        let hiderDist: number | null = null;
+
+        if (mt === "busline") {
+          if (!busLines) { setHiderFeedback("Buslinien-Daten nicht geladen."); return; }
+          const nearest = findNearestBusLines(realPos, busLines);
+          hiderDist = nearest.length > 0 ? nearest[0].dist : null;
+        } else if (mt === "street") {
+          hiderDist = 0;
+        } else if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
+          const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
+          hiderDist = distToNearestBorder(realPos, geojson, level);
+          if (!Number.isFinite(hiderDist)) hiderDist = null;
+        } else {
+          const layerData = poiData[mt];
+          if (!layerData) { setHiderFeedback(`POI-Daten für "${mt}" nicht geladen.`); return; }
+          const nearest = findNearestPoi(realPos, layerData.features);
+          hiderDist = nearest ? nearest.dist : null;
+        }
+
+        if (hiderDist === null) { setHiderFeedback("Abstand konnte nicht berechnet werden."); return; }
+        const diff = hiderDist - seekerDist;
+        const result: "CLOSER" | "FURTHER" = diff <= 0 ? "CLOSER" : "FURTHER";
+
+        answer = { result };
+        const label = MEASURE_TYPES.find((m) => m.id === mt)?.label ?? mt;
+        feedback = `Measuring (${label}): ${result} (du: ${hiderDist.toFixed(2)} km, Sucher: ${seekerDist.toFixed(2)} km)`;
       }
 
       const answerCode: AnswerCode = {
@@ -749,6 +1352,45 @@ function App() {
                   <button className="btn" onClick={() => generateQuestion("MATCH_DISTRICT")}>
                     Matching-Code erzeugen
                   </button>
+                  <hr style={{ border: "none", borderTop: "1px solid #d6e4f2", margin: "8px 0" }} />
+                  <label>Gleicher nächster POI?</label>
+                  <select value={selectedPoiType} onChange={(e) => setSelectedPoiType(e.target.value)}>
+                    {POI_LAYERS.map((l) => (
+                      <option key={l.id} value={l.id}>{l.label}</option>
+                    ))}
+                  </select>
+                  <button className="btn" onClick={() => generateQuestion("MATCH_POI")}>
+                    POI-Matching-Code erzeugen
+                  </button>
+                  <hr style={{ border: "none", borderTop: "1px solid #d6e4f2", margin: "8px 0" }} />
+                  <label>Gleiche nächste Buslinie?</label>
+                  <select value={selectedBusLine} onChange={(e) => setSelectedBusLine(e.target.value)}>
+                    <option value="">– Linie wählen –</option>
+                    {busLines && busLines.features.map((f) => (
+                      <option key={f.properties.route_id} value={f.properties.name}>Linie {f.properties.name}</option>
+                    ))}
+                  </select>
+                  <button className="btn" onClick={() => generateQuestion("MATCH_BUSLINE")}>
+                    Buslinien-Matching-Code erzeugen
+                  </button>
+                  <hr style={{ border: "none", borderTop: "1px solid #d6e4f2", margin: "8px 0" }} />
+                  <label>Gleiche Straße?</label>
+                  <button className="btn" onClick={() => generateQuestion("MATCH_STREET")}>
+                    Straßen-Matching-Code erzeugen
+                  </button>
+                </div>
+
+                <div className="card">
+                  <h3>Measuring Frage</h3>
+                  <p className="meta small">Bist du näher oder weiter entfernt?</p>
+                  <select value={selectedMeasureType} onChange={(e) => setSelectedMeasureType(e.target.value as MeasureType)}>
+                    {MEASURE_TYPES.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  <button className="btn" onClick={() => generateQuestion("MEASURE")}>
+                    Measuring-Code erzeugen
+                  </button>
                 </div>
 
                 <div className="row">
@@ -783,6 +1425,58 @@ function App() {
                 {geojsonError && <div>GeoJSON: {geojsonError}</div>}
               </div>
             )}
+
+            <div className="poi-menu">
+              <button className="poi-menu-toggle" onClick={() => setPoiMenuOpen((v) => !v)}>
+                <span className="poi-menu-arrow">{poiMenuOpen ? "▾" : "▸"}</span>
+                POI-Ebenen
+              </button>
+              {poiMenuOpen && (
+                <div className="poi-menu-list">
+                  <label className="poi-menu-item">
+                    <input
+                      type="checkbox"
+                      checked={busLinesVisible}
+                      onChange={() => setBusLinesVisible((v) => !v)}
+                    />
+                    <span className="poi-color-dot" style={{ background: "#e30613" }} />
+                    Buslinien
+                    {busLines && <span className="poi-count">({busLines.features.length})</span>}
+                  </label>
+                  {POI_LAYERS.map((layer) => (
+                    <label key={layer.id} className="poi-menu-item">
+                      <input
+                        type="checkbox"
+                        checked={poiVisible[layer.id] ?? false}
+                        onChange={() => setPoiVisible((prev) => ({ ...prev, [layer.id]: !prev[layer.id] }))}
+                      />
+                      <span className="poi-color-dot" style={{ background: layer.color }} />
+                      {layer.label}
+                      {poiData[layer.id] && <span className="poi-count">({poiData[layer.id].features.length})</span>}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {busLinesVisible && busLines && (
+              <div className="poi-menu bus-legend">
+                <button className="poi-menu-toggle" onClick={() => setBusLegendOpen((v) => !v)}>
+                  <span className="poi-menu-arrow">{busLegendOpen ? "▾" : "▸"}</span>
+                  Buslinien-Legende
+                </button>
+                {busLegendOpen && (
+                  <div className="poi-menu-list bus-legend-grid">
+                    {busLines.features.map((f) => (
+                      <span key={f.properties.route_id} className="bus-legend-item">
+                        <span className="bus-legend-line" style={{ background: f.properties.color }} />
+                        {f.properties.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </aside>
 
           <section className="map-wrap">
@@ -794,6 +1488,16 @@ function App() {
 
               <RecenterOnPosition position={currentPos} />
               <CenterButton position={currentPos} />
+
+              {role === "seeker" && (
+                <ExclusionOverlay
+                  answers={activeAnswers}
+                  questions={askedCodes}
+                  geojson={geojson}
+                  poiData={poiData}
+                  busLines={busLines}
+                />
+              )}
 
               {(() => {
                 const previewStop = displayedStops.find((s) => s.id === previewStopId);
@@ -836,6 +1540,47 @@ function App() {
                   </CircleMarker>
                 );
               })}
+
+              {busLinesVisible && busLines && busLines.features.map((feature) => {
+                const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]);
+                return (
+                  <Polyline
+                    key={`bus-${feature.properties.route_id}`}
+                    positions={coords}
+                    pathOptions={{ color: feature.properties.color, weight: 3, opacity: 0.8 }}
+                  >
+                    <Tooltip permanent direction="center" className="bus-line-label" offset={[0, 0]}>
+                      {feature.properties.name}
+                    </Tooltip>
+                  </Polyline>
+                );
+              })}
+
+              {POI_LAYERS.map((layer) =>
+                poiVisible[layer.id] && poiData[layer.id]
+                  ? poiData[layer.id].features.map((feature, idx) => {
+                      const [lon, lat] = feature.geometry.coordinates;
+                      const name = String(feature.properties[layer.nameKey] ?? "");
+                      return (
+                        <CircleMarker
+                          key={`${layer.id}-${idx}`}
+                          center={[lat, lon]}
+                          radius={5}
+                          pathOptions={{
+                            color: layer.color,
+                            weight: 1.2,
+                            fillColor: layer.color,
+                            fillOpacity: 0.7,
+                          }}
+                        >
+                          <Popup>
+                            <b>{name || layer.label}</b>
+                          </Popup>
+                        </CircleMarker>
+                      );
+                    })
+                  : null,
+              )}
 
               {currentPos && (
                 <>
