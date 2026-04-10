@@ -849,7 +849,7 @@ function App() {
   const [geojson, setGeojson] = useState<StadtteileCollection | null>(null);
   const [geojsonError, setGeojsonError] = useState<string>("");
   const [selectedStopId, setSelectedStopId] = useState<string>(() => localStorage.getItem("hs_hideout") || "");
-  const [previewStopId, setPreviewStopId] = useState<string>("");
+
   const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
 
   const [hiderInputCode, setHiderInputCode] = useState("");
@@ -867,10 +867,10 @@ function App() {
     walkedKm: number;
     lastPos: Position | null;
   }>({ active: false, targetKm: 0.75, walkedKm: 0, lastPos: null });
-  const [matchLevel, setMatchLevel] = useState<MatchLevel>("bezirk");
-  const [selectedPoiType, setSelectedPoiType] = useState<string>(POI_LAYERS[0].id);
+  const matchLevel: MatchLevel = "bezirk";
+  const selectedPoiType = POI_LAYERS[0].id;
   const [selectedBusLine, setSelectedBusLine] = useState<string>("");
-  const [selectedMeasureType, setSelectedMeasureType] = useState<MeasureType>("kitas");
+  const selectedMeasureType: MeasureType = "kitas";
   const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, boolean>>({});
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
@@ -1710,9 +1710,7 @@ function App() {
                         fillColor: seekerOut ? "#cbd5e1" : "#dc2626",
                         fillOpacity: seekerOut ? 0.25 : 0.9,
                       }}
-                      eventHandlers={{
-                        click: () => setPreviewStopId(stop.id),
-                      }}
+                      eventHandlers={{}}
                     >
                       <Popup>
                         <b>{stop.name}</b>
