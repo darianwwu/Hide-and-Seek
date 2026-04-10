@@ -873,11 +873,23 @@ function App() {
   const selectedMeasureType: MeasureType = "kitas";
   const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, boolean>>({});
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
+  const questionCodeRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (latestQuestionCode) {
+      questionCodeRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [latestQuestionCode]);
+
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
 
   const usedSubKeys = useMemo(
-    () => new Set(Object.values(askedCodes).map((q) => questionSubKey(q.type, q.payload))),
-    [askedCodes],
+    () =>
+      new Set(
+        Object.keys(appliedAnswers)
+          .filter((qid) => askedCodes[qid])
+          .map((qid) => questionSubKey(askedCodes[qid].type, askedCodes[qid].payload)),
+      ),
+    [appliedAnswers, askedCodes],
   );
   const [latestQuestionCode, setLatestQuestionCode] = useState("");
   const [answerInput, setAnswerInput] = useState("");
@@ -1346,6 +1358,14 @@ function App() {
                   <strong>{selectedStop?.name ?? "Noch nicht gewahlt"}</strong>
                 </div>
 
+                {hiderAnswerCode && (
+                  <div className="card" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                    <label style={{ color: "#166534", fontWeight: 700 }}>Letzter Antwortcode</label>
+                    <textarea readOnly value={hiderAnswerCode} style={{ fontSize: "0.85rem" }} />
+                    <button className="btn ghost" onClick={() => copyText(hiderAnswerCode)}>Rauskopieren</button>
+                  </div>
+                )}
+
                 <div className="row">
                   <label>Fragecode vom Sucher</label>
                     <textarea
@@ -1564,8 +1584,7 @@ function App() {
                   );
                 })()}
 
-                <div className="row">
-                  <label>Zuletzt erzeugter Fragecode</label>
+                <div className="row" ref={questionCodeRowRef}>
                   <textarea readOnly value={latestQuestionCode} />
                   <button className="btn ghost" onClick={() => copyText(latestQuestionCode)}>
                     Rauskopieren
