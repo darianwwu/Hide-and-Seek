@@ -387,6 +387,10 @@ textarea {
 .card[data-cat] h3 {
   color: var(--cat-color-dark, #172435);
 }
+.card[data-cat] .btn.ghost {
+  border-color: var(--cat-color, #9bb8d3);
+  color: var(--cat-color-dark, #15395b);
+}
 .card[data-cat="radar"]     { --cat-color: #3b82f6; --cat-color-dark: #1e40af; --cat-bg: #eff6ff; }
 .card[data-cat="thermo"]    { --cat-color: #f59e0b; --cat-color-dark: #92400e; --cat-bg: #fffbeb; }
 .card[data-cat="matching"]  { --cat-color: #10b981; --cat-color-dark: #064e3b; --cat-bg: #ecfdf5; }

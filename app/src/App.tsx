@@ -1293,6 +1293,8 @@ function App() {
 
       setHiderFeedback(feedback);
       setHiderAnswerCode(encodeAnswerCode(answerCode));
+      setHiderInputCode("");
+      setQuestionPreview(null);
     } catch (err) {
       setHiderFeedback(`Code ungültig: ${(err as Error).message}`);
     }
