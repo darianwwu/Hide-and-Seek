@@ -873,15 +873,15 @@ function App() {
   const selectedMeasureType: MeasureType = "kitas";
   const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, boolean>>({});
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
+
+  const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
+  const [latestQuestionCode, setLatestQuestionCode] = useState("");
   const questionCodeRowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (latestQuestionCode) {
       questionCodeRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [latestQuestionCode]);
-
-  const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
-  const [latestQuestionCode, setLatestQuestionCode] = useState("");
   const [answerInput, setAnswerInput] = useState("");
   const [answerFeedback, setAnswerFeedback] = useState("");
   const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>({});
