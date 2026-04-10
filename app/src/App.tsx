@@ -881,6 +881,10 @@ function App() {
   }, [latestQuestionCode]);
 
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
+  const [latestQuestionCode, setLatestQuestionCode] = useState("");
+  const [answerInput, setAnswerInput] = useState("");
+  const [answerFeedback, setAnswerFeedback] = useState("");
+  const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>({});
 
   const usedSubKeys = useMemo(
     () =>
@@ -891,10 +895,6 @@ function App() {
       ),
     [appliedAnswers, askedCodes],
   );
-  const [latestQuestionCode, setLatestQuestionCode] = useState("");
-  const [answerInput, setAnswerInput] = useState("");
-  const [answerFeedback, setAnswerFeedback] = useState("");
-  const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>({});
 
   const [poiData, setPoiData] = useState<Record<string, PoiCollection>>({});
   const [poiVisible, setPoiVisible] = useState<Record<string, boolean>>(() => Object.fromEntries(POI_LAYERS.map((l) => [l.id, false])));
