@@ -775,16 +775,87 @@ function renderType(type: QuestionType): string {
   return "Matching Frage";
 }
 
+type QuestionPreview = { text: string; reward: string; time: string; doubled: boolean };
+
+const FOTO_QUESTIONS: { id: string; label: string }[] = [
+  { id: "gebaeude", label: "Gebäude" },
+  { id: "breiteste_strasse", label: "Breiteste Straße" },
+  { id: "baum", label: "Baum" },
+  { id: "groesste_struktur", label: "Größte Struktur" },
+  { id: "selfie", label: "Selfie" },
+  { id: "himmel", label: "Himmel" },
+  { id: "bushaltestelle", label: "Bushaltestelle" },
+];
+
+function questionSubKey(type: QuestionType, payload: Record<string, unknown>): string {
+  if (type === "MATCH_DISTRICT") return `MATCH_DISTRICT_${payload.level as string}`;
+  if (type === "MATCH_POI") return `MATCH_POI_${payload.poiType as string}`;
+  if (type === "MATCH_BUSLINE") return `MATCH_BUSLINE_${payload.lineName as string}`;
+  if (type === "MEASURE") return `MEASURE_${payload.measureType as string}`;
+  return type;
+}
+
+function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
+  function rewardFor(type: QuestionType): { reward: string; time: string } {
+    if (type === "RADAR" || type === "THERMO_PATH") return { reward: "2 Karten ziehen, 1 behalten", time: "3 min" };
+    if (type === "MATCH_DISTRICT" || type === "MATCH_POI" || type === "MATCH_BUSLINE" || type === "MATCH_STREET") return { reward: "3 Karten ziehen, 1 behalten", time: "3 min" };
+    if (type === "MEASURE") return { reward: "3 Karten ziehen, 1 behalten", time: "3 min" };
+    return { reward: "", time: "" };
+  }
+  const { reward, time } = rewardFor(decoded.type);
+  if (decoded.type === "RADAR") {
+    const radiusKm = Number(decoded.payload.radiusKm);
+    const meters = Math.round(radiusKm * 1000);
+    return { text: `Bist du im Umkreis von ${meters} Metern von uns?`, reward, time, doubled: false };
+  }
+  if (decoded.type === "THERMO_PATH") {
+    const start = decoded.payload.start as [number, number];
+    const end = decoded.payload.end as [number, number];
+    const km = haversineKm({ lat: start[0], lon: start[1] }, { lat: end[0], lon: end[1] });
+    const meters = Math.round(km * 1000);
+    return { text: `Wir sind ${meters} Meter gelaufen, sind wir jetzt näher dran oder weiter weg?`, reward, time, doubled: false };
+  }
+  if (decoded.type === "MATCH_DISTRICT") {
+    const level = decoded.payload.level as string;
+    const label = level === "bezirk" ? "Bezirk" : "Stadtbezirk";
+    return { text: `Bist du im gleichen ${label} wie wir?`, reward, time, doubled: false };
+  }
+  if (decoded.type === "MATCH_POI") {
+    const poiType = decoded.payload.poiType as string;
+    const name = decoded.payload.nearestName as string;
+    const label = POI_LAYERS.find((l) => l.id === poiType)?.label ?? poiType;
+    return { text: `Ist unser nächster ${label} \u201e${name}\u201c auch dein nächster ${label}?`, reward, time, doubled: false };
+  }
+  if (decoded.type === "MATCH_BUSLINE") {
+    const line = decoded.payload.lineName as string;
+    return { text: `Ist unsere nächste Buslinie (Linie ${line}) auch deine nächste Buslinie?`, reward, time, doubled: false };
+  }
+  if (decoded.type === "MATCH_STREET") {
+    const street = decoded.payload.street as string;
+    return { text: `Sind wir auf der gleichen Straße? (Unsere Straße: ${street})`, reward, time, doubled: false };
+  }
+  if (decoded.type === "MEASURE") {
+    const mt = decoded.payload.measureType as MeasureType;
+    const distKm = Number(decoded.payload.distKm);
+    const meters = Math.round(distKm * 1000);
+    const label = MEASURE_TYPES.find((m) => m.id === mt)?.label ?? mt;
+    return { text: `Wir sind ${meters} Meter von einem ${label} entfernt. Bist du näher dran oder weiter entfernt von einem ${label} als wir?`, reward, time, doubled: false };
+  }
+  return { text: "Unbekannte Frage", reward: "", time: "", doubled: false };
+}
+
 function App() {
   const [role, setRole] = useState<Role>(() => (localStorage.getItem("hs_role") as Role) || "landing");
   const [geojson, setGeojson] = useState<StadtteileCollection | null>(null);
   const [geojsonError, setGeojsonError] = useState<string>("");
   const [selectedStopId, setSelectedStopId] = useState<string>(() => localStorage.getItem("hs_hideout") || "");
   const [previewStopId, setPreviewStopId] = useState<string>("");
+  const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
 
   const [hiderInputCode, setHiderInputCode] = useState("");
   const [hiderFeedback, setHiderFeedback] = useState("");
   const [hiderAnswerCode, setHiderAnswerCode] = useState("");
+  const [questionPreview, setQuestionPreview] = useState<QuestionPreview | null>(null);
 
   const [radarPreset, setRadarPreset] = useState<RadarPreset>("1");
   const [radarCustomKmInput, setRadarCustomKmInput] = useState("0,2");
@@ -800,7 +871,14 @@ function App() {
   const [selectedPoiType, setSelectedPoiType] = useState<string>(POI_LAYERS[0].id);
   const [selectedBusLine, setSelectedBusLine] = useState<string>("");
   const [selectedMeasureType, setSelectedMeasureType] = useState<MeasureType>("kitas");
+  const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, boolean>>({});
+  const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
+
+  const usedSubKeys = useMemo(
+    () => new Set(Object.values(askedCodes).map((q) => questionSubKey(q.type, q.payload))),
+    [askedCodes],
+  );
   const [latestQuestionCode, setLatestQuestionCode] = useState("");
   const [answerInput, setAnswerInput] = useState("");
   const [answerFeedback, setAnswerFeedback] = useState("");
@@ -931,7 +1009,8 @@ function App() {
     });
   }, [activeAnswers, askedCodes, geojson, poiData, busLines]);
 
-  async function generateQuestion(type: QuestionType): Promise<void> {
+  type GenOpts = { level?: MatchLevel; poiType?: string; lineName?: string; measureType?: MeasureType };
+  async function generateQuestion(type: QuestionType, opts?: GenOpts): Promise<void> {
     if (!currentPos) return;
 
     let payload: Record<string, unknown> = {};
@@ -956,13 +1035,14 @@ function App() {
 
     if (type === "MATCH_DISTRICT") {
       payload = {
-        level: matchLevel,
+        level: opts?.level ?? matchLevel,
         reference: [currentPos.lat, currentPos.lon],
       };
     }
 
     if (type === "MATCH_POI") {
-      const layerData = poiData[selectedPoiType];
+      const poiType = opts?.poiType ?? selectedPoiType;
+      const layerData = poiData[poiType];
       if (!layerData) {
         setAnswerFeedback("POI-Daten noch nicht geladen.");
         return;
@@ -973,19 +1053,20 @@ function App() {
         return;
       }
       payload = {
-        poiType: selectedPoiType,
+        poiType,
         reference: [currentPos.lat, currentPos.lon],
         nearestName: nearest.name,
       };
     }
 
     if (type === "MATCH_BUSLINE") {
-      if (!selectedBusLine) {
+      const lineName = opts?.lineName ?? selectedBusLine;
+      if (!lineName) {
         setAnswerFeedback("Bitte eine Buslinie auswählen.");
         return;
       }
       payload = {
-        lineName: selectedBusLine,
+        lineName,
         reference: [currentPos.lat, currentPos.lon],
       };
     }
@@ -1004,7 +1085,7 @@ function App() {
     }
 
     if (type === "MEASURE") {
-      const mt = selectedMeasureType;
+      const mt = opts?.measureType ?? selectedMeasureType;
       let distKm: number | null = null;
 
       if (mt === "busline") {
@@ -1269,22 +1350,85 @@ function App() {
                   <label>Fragecode vom Sucher</label>
                     <textarea
                       value={hiderInputCode}
-                      onChange={(e) => setHiderInputCode(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setHiderInputCode(val);
+                        setHiderFeedback("");
+                        setHiderAnswerCode("");
+                        try {
+                          const decoded = decodeCode(val.trim());
+                          if ("payload" in decoded) {
+                            const preview = translateQuestionCode(decoded);
+                            const subKey = questionSubKey(decoded.type, decoded.payload);
+                            const doubled = usedSubKeys.has(subKey);
+                            setQuestionPreview({ ...preview, doubled });
+                          }
+                        } catch {
+                          setQuestionPreview(null);
+                        }
+                      }}
                       placeholder="RADAR_1A2B_51.96070;7.62610;2km"
                     />
                 </div>
-                <button className="btn" onClick={evaluateHiderCode}>
-                  Code auswerten
-                </button>
-                <p className="meta">{hiderFeedback}</p>
 
-                <div className="row">
-                  <label>Antwortcode fur WhatsApp</label>
-                  <textarea readOnly value={hiderAnswerCode} placeholder="A_RADAR_1A2B_JA" />
-                  <button className="btn ghost" onClick={() => copyText(hiderAnswerCode)}>
-                    Rauskopieren
-                  </button>
-                </div>
+                {questionPreview !== null && (
+                  <div className="question-preview-overlay" onClick={() => setQuestionPreview(null)}>
+                    <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
+                      <p className="question-preview-text">{questionPreview.text}</p>
+                      <div className="question-preview-meta">
+                        <span>🎴 {questionPreview.doubled ? <><s>{questionPreview.reward}</s> <strong style={{color:"#16a34a"}}>{questionPreview.reward.replace(/\d+(?= Karten)/, (n) => String(Number(n)*2))}</strong> (2×)</> : questionPreview.reward}</span>
+                        <span>⏱️ {questionPreview.time}</span>
+                      </div>
+                      {questionPreview.doubled && (
+                        <p className="meta small" style={{ color: "#b45309", margin: 0 }}>⚠️ Diese Frage wurde bereits gestellt – doppelte Belohnung!</p>
+                      )}
+                      <button
+                        className="btn"
+                        onClick={async () => {
+                          await evaluateHiderCode();
+                        }}
+                      >
+                        Code auswerten
+                      </button>
+                      {hiderFeedback && <p className="meta" style={{ margin: 0 }}>{hiderFeedback}</p>}
+                      {hiderAnswerCode && (
+                        <>
+                          <textarea readOnly value={hiderAnswerCode} style={{ width: "100%", resize: "none", fontSize: "0.85rem" }} />
+                          <button className="btn ghost" onClick={() => { copyText(hiderAnswerCode); }}>Rauskopieren</button>
+                        </>
+                      )}
+                      <button className="btn ghost" onClick={() => setQuestionPreview(null)}>Schließen</button>
+                    </div>
+                  </div>
+                )}
+
+                {confirmStopId !== null && (() => {
+                  const confirmStop = STOPS.find((s) => s.id === confirmStopId);
+                  return (
+                    <div className="question-preview-overlay" onClick={() => setConfirmStopId(null)}>
+                      <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
+                        <p className="question-preview-text">
+                          <strong>{confirmStop?.name}</strong> als Versteck festlegen?
+                        </p>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            className="btn"
+                            style={{ flex: 1 }}
+                            onClick={() => {
+                              setSelectedStopId(confirmStopId);
+                              setConfirmStopId(null);
+                            }}
+                          >
+                            Ja
+                          </button>
+                          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmStopId(null)}>
+                            Abbrechen
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="card">
                   <h3>Belohnungen &amp; Zeitlimits</h3>
@@ -1304,7 +1448,7 @@ function App() {
                 <h2>Sucher</h2>
                 <p className="meta">Erzeuge Fragen, sende den Code und trage die Antwort wieder ein.</p>
 
-                <div className="card">
+                <div className="card" data-cat="radar">
                   <h3>Radar</h3>
                   <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <label>Radius</label>
@@ -1325,10 +1469,10 @@ function App() {
                     />
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
-                  <button className="btn" onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
+                  <button className={`q-btn${usedSubKeys.has("RADAR") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
                 </div>
 
-                <div className="card">
+                <div className="card" data-cat="thermo">
                   <h3>Thermometer</h3>
                   <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="split-buttons">
@@ -1353,73 +1497,72 @@ function App() {
                     )}
                   </p>
                   <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
-                  <button className="btn" onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
+                  <button className={`q-btn${usedSubKeys.has("THERMO_PATH") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
                 </div>
 
-                <div className="card">
+                <div className="card" data-cat="matching">
                   <h3>Matching Frage</h3>
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
-                  <select value={matchLevel} onChange={(e) => setMatchLevel(e.target.value as MatchLevel)}>
-                    <option value="bezirk">Gleicher Bezirk?</option>
-                    <option value="stadtbezirk">Gleicher Stadtbezirk?</option>
-                  </select>
-                  <button className="btn" onClick={() => generateQuestion("MATCH_DISTRICT")}>
-                    Matching-Code erzeugen
-                  </button>
-                  <hr style={{ border: "none", borderTop: "1px solid #d6e4f2", margin: "8px 0" }} />
-                  <label>Gleicher nächster POI?</label>
-                  <select value={selectedPoiType} onChange={(e) => setSelectedPoiType(e.target.value)}>
+                  <div className="q-grid">
+                    <button className={`q-btn${usedSubKeys.has("MATCH_DISTRICT_bezirk") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "bezirk" })}>Bezirk</button>
+                    <button className={`q-btn${usedSubKeys.has("MATCH_DISTRICT_stadtbezirk") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "stadtbezirk" })}>Stadtbezirk</button>
                     {POI_LAYERS.map((l) => (
-                      <option key={l.id} value={l.id}>{l.label}</option>
+                      <button key={l.id} className={`q-btn${usedSubKeys.has(`MATCH_POI_${l.id}`) ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_POI", { poiType: l.id })}>{l.label}</button>
                     ))}
-                  </select>
-                  <button className="btn" onClick={() => generateQuestion("MATCH_POI")}>
-                    POI-Matching-Code erzeugen
-                  </button>
-                  <hr style={{ border: "none", borderTop: "1px solid #d6e4f2", margin: "8px 0" }} />
-                  <label>Gleiche nächste Buslinie?</label>
-                  <select value={selectedBusLine} onChange={(e) => setSelectedBusLine(e.target.value)}>
-                    <option value="">– Linie wählen –</option>
-                    {busLines && busLines.features.map((f) => (
-                      <option key={f.properties.route_id} value={f.properties.name}>Linie {f.properties.name}</option>
-                    ))}
-                  </select>
-                  <button className="btn" onClick={() => generateQuestion("MATCH_BUSLINE")}>
-                    Buslinien-Matching-Code erzeugen
-                  </button>
-                  <hr style={{ border: "none", borderTop: "1px solid #d6e4f2", margin: "8px 0" }} />
-                  <label>Gleiche Straße?</label>
-                  <button className="btn" onClick={() => generateQuestion("MATCH_STREET")}>
-                    Straßen-Matching-Code erzeugen
-                  </button>
+                    <button className={`q-btn${usedSubKeys.has("MATCH_STREET") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_STREET")}>Straße</button>
+                  </div>
+                  <div className="q-busline-row">
+                    <select value={selectedBusLine} onChange={(e) => setSelectedBusLine(e.target.value)}>
+                      <option value="">– Buslinie wählen –</option>
+                      {busLines && busLines.features.map((f) => (
+                        <option key={f.properties.route_id} value={f.properties.name}>Linie {f.properties.name}</option>
+                      ))}
+                    </select>
+                    <button className={`q-btn${selectedBusLine && usedSubKeys.has(`MATCH_BUSLINE_${selectedBusLine}`) ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_BUSLINE")}>Buslinie →</button>
+                  </div>
                 </div>
 
-                <div className="card">
+                <div className="card" data-cat="measuring">
                   <h3>Measuring Frage</h3>
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
-                  <select value={selectedMeasureType} onChange={(e) => setSelectedMeasureType(e.target.value as MeasureType)}>
+                  <div className="q-grid">
                     {MEASURE_TYPES.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
+                      <button key={m.id} className={`q-btn${usedSubKeys.has(`MEASURE_${m.id}`) ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MEASURE", { measureType: m.id })}>{m.label}</button>
                     ))}
-                  </select>
-                  <button className="btn" onClick={() => generateQuestion("MEASURE")}>
-                    Measuring-Code erzeugen
-                  </button>
+                  </div>
                 </div>
 
-                <div className="card">
+                <div className="card" data-cat="foto">
                   <h3>Foto Frage</h3>
                   <p className="meta small">Belohnung: 1 Karte ziehen, 1 behalten · Zeitlimit: 10 min</p>
-                  <ul className="foto-fragen-list">
-                    <li>Gebäude (sichtbar von der Bushaltestelle)</li>
-                    <li>Breiteste Straße</li>
-                    <li>Baum</li>
-                    <li>Größte Struktur im Sichtfeld</li>
-                    <li>Selfie</li>
-                    <li>Himmel</li>
-                    <li>Bushaltestelle</li>
-                  </ul>
+                  <div className="q-grid">
+                    {FOTO_QUESTIONS.map((q) => (
+                      <button key={q.id} className={`q-btn${usedFotoQuestions[q.id] ? " q-btn--used" : ""}`} onClick={() => setFotoConfirmQuestion(q.id)}>{q.label}</button>
+                    ))}
+                  </div>
                 </div>
+
+                {fotoConfirmQuestion !== null && (() => {
+                  const fq = FOTO_QUESTIONS.find((q) => q.id === fotoConfirmQuestion);
+                  return (
+                    <div className="question-preview-overlay" onClick={() => setFotoConfirmQuestion(null)}>
+                      <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
+                        <p className="question-preview-text">Foto-Frage stellen: <strong>{fq?.label}</strong>?</p>
+                        <div className="question-preview-meta">
+                          <span>🎴 1 Karte ziehen, 1 behalten</span>
+                          <span>⏱️ 10 min</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="btn" style={{ flex: 1 }} onClick={() => {
+                            setUsedFotoQuestions((prev) => ({ ...prev, [fotoConfirmQuestion]: true }));
+                            setFotoConfirmQuestion(null);
+                          }}>Ja, stellen</button>
+                          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setFotoConfirmQuestion(null)}>Abbrechen</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="row">
                   <label>Zuletzt erzeugter Fragecode</label>
@@ -1528,46 +1671,70 @@ function App() {
               )}
 
               {(() => {
-                const previewStop = displayedStops.find((s) => s.id === previewStopId);
-                return previewStop ? (
-                  <Circle
-                    center={[previewStop.lat, previewStop.lon]}
-                    radius={HIDE_RADIUS_M}
-                    pathOptions={{ color: "#16a34a", weight: 1.5, fillColor: "#4ade80", fillOpacity: 0.12 }}
-                  />
-                ) : null;
+                // Hider: show only selected stop with permanent radius
+                if (role === "hider" && selectedStop) {
+                  return (
+                    <>
+                      <Circle
+                        center={[selectedStop.lat, selectedStop.lon]}
+                        radius={HIDE_RADIUS_M}
+                        pathOptions={{ color: "#0f172a", weight: 1.5, fillColor: "#94a3b8", fillOpacity: 0.15 }}
+                      />
+                      <CircleMarker
+                        center={[selectedStop.lat, selectedStop.lon]}
+                        radius={8}
+                        pathOptions={{ color: "#0f172a", weight: 2.4, fillColor: "#dc2626", fillOpacity: 0.9 }}
+                      >
+                        <Popup>
+                          <b>{selectedStop.name}</b>
+                          <br />
+                          {selectedStop.count} Steig(e)
+                        </Popup>
+                      </CircleMarker>
+                    </>
+                  );
+                }
+
+                // Hider (no hideout yet) or Seeker: show all stops
+                const stopsToShow = role === "hider" ? STOPS : displayedStops;
+                return stopsToShow.map((stop) => {
+                  const seekerOut = role === "seeker" && !filteredStops.some((item) => item.id === stop.id);
+                  return (
+                    <CircleMarker
+                      key={stop.id}
+                      center={[stop.lat, stop.lon]}
+                      radius={6}
+                      pathOptions={{
+                        color: "#7f1d1d",
+                        weight: 1.4,
+                        fillColor: seekerOut ? "#cbd5e1" : "#dc2626",
+                        fillOpacity: seekerOut ? 0.25 : 0.9,
+                      }}
+                      eventHandlers={{
+                        click: () => setPreviewStopId(stop.id),
+                      }}
+                    >
+                      <Popup>
+                        <b>{stop.name}</b>
+                        <br />
+                        {stop.count} Steig(e)
+                        {role === "hider" && (
+                          <>
+                            <br />
+                            <button
+                              className="btn"
+                              style={{ marginTop: 8, width: "100%" }}
+                              onClick={() => setConfirmStopId(stop.id)}
+                            >
+                              Als Versteck auswählen
+                            </button>
+                          </>
+                        )}
+                      </Popup>
+                    </CircleMarker>
+                  );
+                });
               })()}
-
-              {displayedStops.map((stop) => {
-                const selected = stop.id === selectedStopId;
-                const seekerOut = role === "seeker" && !filteredStops.some((item) => item.id === stop.id);
-
-                return (
-                  <CircleMarker
-                    key={stop.id}
-                    center={[stop.lat, stop.lon]}
-                    radius={selected ? 8 : 6}
-                    pathOptions={{
-                      color: selected ? "#0f172a" : "#7f1d1d",
-                      weight: selected ? 2.4 : 1.4,
-                      fillColor: seekerOut ? "#cbd5e1" : selected ? "#f59e0b" : "#dc2626",
-                      fillOpacity: seekerOut ? 0.25 : 0.9,
-                    }}
-                    eventHandlers={{
-                      click: () => {
-                        if (role === "hider") setSelectedStopId(stop.id);
-                        setPreviewStopId(stop.id);
-                      },
-                    }}
-                  >
-                    <Popup>
-                      <b>{stop.name}</b>
-                      <br />
-                      {stop.count} Steig(e)
-                    </Popup>
-                  </CircleMarker>
-                );
-              })}
 
               {busLinesVisible && busLines && busLines.features.map((feature) => {
                 const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]);

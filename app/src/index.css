@@ -335,3 +335,118 @@ textarea {
   line-height: 1.6;
   color: #374151;
 }
+
+.question-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.question-preview-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px 28px;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.question-preview-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.question-preview-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: #475569;
+}
+
+.doubled-warning {
+  margin: 2px 0 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #b45309;
+}
+
+/* -- Category card color schemes ----------------------- */
+.card[data-cat] {
+  border-top: 3px solid var(--cat-color, #b8cde1);
+}
+.card[data-cat] h3 {
+  color: var(--cat-color-dark, #172435);
+}
+.card[data-cat="radar"]     { --cat-color: #3b82f6; --cat-color-dark: #1e40af; --cat-bg: #eff6ff; }
+.card[data-cat="thermo"]    { --cat-color: #f59e0b; --cat-color-dark: #92400e; --cat-bg: #fffbeb; }
+.card[data-cat="matching"]  { --cat-color: #10b981; --cat-color-dark: #064e3b; --cat-bg: #ecfdf5; }
+.card[data-cat="measuring"] { --cat-color: #8b5cf6; --cat-color-dark: #3b0764; --cat-bg: #f5f3ff; }
+.card[data-cat="foto"]      { --cat-color: #f43f5e; --cat-color-dark: #881337; --cat-bg: #fff1f2; }
+
+/* -- Question sub-type button grid --------------------- */
+.q-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.q-btn {
+  position: relative;
+  padding: 8px 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1.5px solid var(--cat-color, #b8cde1);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cat-color-dark, #172435);
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.3;
+  transition: background 0.1s, opacity 0.1s;
+  width: 100%;
+}
+
+.q-btn:hover:not(.q-btn--used) {
+  background: var(--cat-bg, #f0f7ff);
+}
+
+.q-btn--used {
+  opacity: 0.6;
+  background: var(--cat-bg, #f0f7ff);
+}
+
+.q-btn--used::after {
+  content: "?";
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 0.62rem;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+/* -- Busline row inside Matching card ------------------ */
+.q-busline-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
