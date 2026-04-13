@@ -76,15 +76,15 @@ type BusLineCollection = {
 };
 
 const POI_LAYERS: PoiLayerConfig[] = [
-  { id: "kitas", label: "Kitas", file: "kitas_ms.geojson", color: "#e91e63", nameKey: "E_NAME" },
-  { id: "schulen", label: "Schulen", file: "schulen_ms.geojson", color: "#9c27b0", nameKey: "NAME" },
-  { id: "sportstaetten", label: "Sportstätten", file: "sportstaetten.geojson", color: "#4caf50", nameKey: "Name" },
-  { id: "friedhoefe", label: "Friedhöfe", file: "friedhoefe.geojson", color: "#607d8b", nameKey: "NAME" },
-  { id: "kinos", label: "Kinos", file: "kinos.geojson", color: "#ff9800", nameKey: "NAME" },
-  { id: "krankenhaeuser", label: "Krankenhäuser", file: "krankenhaeuser.geojson", color: "#f44336", nameKey: "NAME" },
-  { id: "museen", label: "Museen", file: "museen.geojson", color: "#3f51b5", nameKey: "NAME" },
-  { id: "buechereien", label: "Büchereien", file: "buechereien.geojson", color: "#00bcd4", nameKey: "NAME" },
-  { id: "baeder", label: "Bäder", file: "baeder.geojson", color: "#2196f3", nameKey: "NAME" },
+  { id: "kitas", label: "Kita", file: "kitas_ms.geojson", color: "#e91e63", nameKey: "E_NAME" },
+  { id: "schulen", label: "Schule", file: "schulen_ms.geojson", color: "#9c27b0", nameKey: "NAME" },
+  { id: "sportstaetten", label: "Sportstätte", file: "sportstaetten.geojson", color: "#4caf50", nameKey: "Name" },
+  { id: "friedhoefe", label: "Friedhof", file: "friedhoefe.geojson", color: "#607d8b", nameKey: "NAME" },
+  { id: "kinos", label: "Kino", file: "kinos.geojson", color: "#ff9800", nameKey: "NAME" },
+  { id: "krankenhaeuser", label: "Krankenhaus", file: "krankenhaeuser.geojson", color: "#f44336", nameKey: "NAME" },
+  { id: "museen", label: "Museum", file: "museen.geojson", color: "#3f51b5", nameKey: "NAME" },
+  { id: "buechereien", label: "Bücherei", file: "buechereien.geojson", color: "#00bcd4", nameKey: "NAME" },
+  { id: "baeder", label: "Bad", file: "baeder.geojson", color: "#2196f3", nameKey: "NAME" },
 ];
 
 const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
@@ -1801,11 +1801,11 @@ function App() {
                   <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <label>Radius</label>
                   <div className="split-buttons">
-                    <button className={`btn ghost ${radarPreset === "0.25" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.25")}>250 m</button>
-                    <button className={`btn ghost ${radarPreset === "0.5" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.5")}>500 m</button>
-                    <button className={`btn ghost ${radarPreset === "1" ? "active-btn" : ""}`} onClick={() => setRadarPreset("1")}>1 km</button>
-                    <button className={`btn ghost ${radarPreset === "2" ? "active-btn" : ""}`} onClick={() => setRadarPreset("2")}>2 km</button>
-                    <button className={`btn ghost ${radarPreset === "custom" ? "active-btn" : ""}`} onClick={() => setRadarPreset("custom")}>Custom</button>
+                    <button className={`btn ghost q-btn${qBtnCls("RADAR_0.25", usedSubKeys)} ${radarPreset === "0.25" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.25")}>250 m</button>
+                    <button className={`btn ghost q-btn${qBtnCls("RADAR_0.5", usedSubKeys)} ${radarPreset === "0.5" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.5")}>500 m</button>
+                    <button className={`btn ghost q-btn${qBtnCls("RADAR_1", usedSubKeys)} ${radarPreset === "1" ? "active-btn" : ""}`} onClick={() => setRadarPreset("1")}>1 km</button>
+                    <button className={`btn ghost q-btn${qBtnCls("RADAR_2", usedSubKeys)} ${radarPreset === "2" ? "active-btn" : ""}`} onClick={() => setRadarPreset("2")}>2 km</button>
+                    <button className={`btn ghost q-btn${qBtnCls("RADAR_custom", usedSubKeys)} ${radarPreset === "custom" ? "active-btn" : ""}`} onClick={() => setRadarPreset("custom")}>Custom</button>
                   </div>
                   {radarPreset === "custom" && (
                     <input
@@ -1817,17 +1817,17 @@ function App() {
                     />
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
-                  <button className={`q-btn${qBtnCls(radarPreset === "custom" ? "RADAR_custom" : `RADAR_${radarPreset}`, usedSubKeys)}`} onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
+                  <button className="q-btn" onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
                 </div>
 
                 <div className="card" data-cat="thermo">
                   <h3>Thermometer</h3>
                   <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="split-buttons">
-                    <button className="btn ghost" onClick={() => startThermometer(0.75)}>
+                    <button className={`btn ghost q-btn${qBtnCls("THERMO_PATH_0.75", usedSubKeys)}`} onClick={() => startThermometer(0.75)}>
                       Start 750 m
                     </button>
-                    <button className="btn ghost" onClick={() => startThermometer(1.5)}>
+                    <button className={`btn ghost q-btn${qBtnCls("THERMO_PATH_1.5", usedSubKeys)}`} onClick={() => startThermometer(1.5)}>
                       Start 1,5 km
                     </button>
                   </div>
@@ -1845,7 +1845,7 @@ function App() {
                     )}
                   </p>
                   <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
-                  <button className={`q-btn${qBtnCls(`THERMO_PATH_${thermoTracking.targetKm}`, usedSubKeys)}`} onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
+                  <button className="q-btn" onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
                 </div>
 
                 <div className="card" data-cat="matching">

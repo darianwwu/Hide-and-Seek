@@ -480,8 +480,8 @@ test.describe("Seeker Panel - UI Structure", () => {
     const card = page.locator("[data-cat='matching']");
     await expect(card.getByRole("button", { name: "Bezirk", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Stadtbezirk", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "Kitas", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "Schulen", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Kita", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Schule", exact: true })).toBeVisible();
   });
 
   test("measuring card has border and POI buttons", async ({ page }) => {
@@ -492,7 +492,7 @@ test.describe("Seeker Panel - UI Structure", () => {
     await expect(card.getByRole("button", { name: "Bezirksgrenze", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Stadtbezirksgrenze", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Buslinie", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "Kitas", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Kita", exact: true })).toBeVisible();
   });
 
   test("foto card has photo question buttons", async ({ page }) => {
@@ -553,29 +553,29 @@ test.describe("Seeker Question Code Generation", () => {
     expect(code).toMatch(/^MATCH_[A-Z0-9]{4}_S_\d+\.\d+;\d+\.\d+$/);
   });
 
-  test("matching POI kitas code is generated", async ({ page }) => {
+  test("matching POI kita code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "seeker");
-    await page.locator("[data-cat='matching']").getByRole("button", { name: "Kitas", exact: true }).click();
+    await page.locator("[data-cat='matching']").getByRole("button", { name: "Kita", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MPOI_[A-Z0-9]{4}_kitas_\d+\.\d+;\d+\.\d+_.+$/);
   });
 
-  test("matching POI schulen code is generated", async ({ page }) => {
+  test("matching POI schule code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "seeker");
-    await page.locator("[data-cat='matching']").getByRole("button", { name: "Schulen", exact: true }).click();
+    await page.locator("[data-cat='matching']").getByRole("button", { name: "Schule", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MPOI_[A-Z0-9]{4}_schulen_\d+\.\d+;\d+\.\d+_.+$/);
   });
 
-  test("measuring kitas code is generated", async ({ page }) => {
+  test("measuring kita code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "seeker");
-    await page.locator("[data-cat='measuring']").getByRole("button", { name: "Kitas", exact: true }).click();
+    await page.locator("[data-cat='measuring']").getByRole("button", { name: "Kita", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MEAS_[A-Z0-9]{4}_kitas_\d+(?:,\d+)?_\d+\.\d+;\d+\.\d+$/);
   });
@@ -628,13 +628,15 @@ test.describe("Seeker Apply Answers", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "seeker");
-    const radarBtn = page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" });
-    await radarBtn.click();
+    const radarCard = page.locator("[data-cat='radar']");
+    await radarCard.getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     const qid = code.match(/^RADAR_([A-Z0-9]{4})_/)![1];
     await page.getByPlaceholder("A_RADAR_1A2B_JA").fill(`A_RADAR_${qid}_JA`);
     await page.getByRole("button", { name: "Antwort anwenden" }).click();
-    await expect(radarBtn).toHaveClass(/q-btn--used/);
+    // The "1 km" preset button (default) should be marked as used
+    const presetBtn = radarCard.getByRole("button", { name: "1 km" });
+    await expect(presetBtn).toHaveClass(/q-btn--used/);
   });
 });
 
@@ -750,7 +752,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "seeker");
-    await page.locator("[data-cat='matching']").getByRole("button", { name: "Schulen", exact: true }).click();
+    await page.locator("[data-cat='matching']").getByRole("button", { name: "Schule", exact: true }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
@@ -768,7 +770,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "seeker");
-    await page.locator("[data-cat='measuring']").getByRole("button", { name: "Kitas", exact: true }).click();
+    await page.locator("[data-cat='measuring']").getByRole("button", { name: "Kita", exact: true }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
