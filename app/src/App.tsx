@@ -121,8 +121,8 @@ const GROUP_MAP: Record<string, string> = {
   "71": "Mauritz",
   "34": "Berg Fidel",
   "91": "Berg Fidel",
-  "62": "Kinderhaus",
-  "63": "Kinderhaus",
+  "62": "Kinderhaus-Ost",
+  "63": "Kinderhaus-West",
   "95": "Hiltrup",
   "96": "Hiltrup",
   "97": "Hiltrup",
@@ -145,11 +145,86 @@ const GROUP_MAP: Record<string, string> = {
 
 const EXCLUDED_DISTRICTS = new Set(["Sprakel", "Nienberge", "Roxel", "Albachten", "Amelsbüren", "Wolbeck"]);
 
+const STADTBEZIRK_MAP: Record<string, string> = {
+  "1 Altstadt": "Mitte",
+  "2 Innenstadtring": "Mitte",
+  "3 Mitte-S\u00fcd": "Mitte",
+  "4 Mitte-Nordost": "Mitte",
+  "5 M\u00fcnster-West": "West",
+  "6 M\u00fcnster-Nord": "Nord",
+  "7 M\u00fcnster-Ost": "Ost",
+  "8 M\u00fcnster-S\u00fcdost": "S\u00fcdost",
+  "9 M\u00fcnster-Hiltrup": "Hiltrup",
+};
+
 const DISTRICT_COLORS = ["#e53935","#7b1fa2","#1565c0","#00695c","#e65100","#283593","#006064","#2e7d32","#f57f17","#4e342e","#0277bd","#558b2f"];
 function districtColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff;
   return DISTRICT_COLORS[hash % DISTRICT_COLORS.length];
+}
+
+function dissolveFeatures(features: StadtteilFeature[]): [number, number][][] {
+  const PREC = 6;
+  const pk = (x: number, y: number) => `${x.toFixed(PREC)},${y.toFixed(PREC)}`;
+
+  // Directed edge map: fwdKey -> edge data. Shared edges (A→B + B→A) cancel out.
+  const edgeMap = new Map<string, { fx: number; fy: number; tx: number; ty: number }>();
+
+  const addEdge = (ax: number, ay: number, bx: number, by: number) => {
+    const fwdKey = `${pk(ax, ay)}>${pk(bx, by)}`;
+    const revKey = `${pk(bx, by)}>${pk(ax, ay)}`;
+    if (edgeMap.has(revKey)) {
+      edgeMap.delete(revKey);
+    } else {
+      edgeMap.set(fwdKey, { fx: ax, fy: ay, tx: bx, ty: by });
+    }
+  };
+
+  for (const feature of features) {
+    const geom = feature.geometry;
+    const outerRings: number[][][] =
+      geom.type === "Polygon"
+        ? [geom.coordinates[0] as number[][]]
+        : (geom.coordinates as number[][][][]).map((poly) => poly[0]);
+    for (const ring of outerRings) {
+      for (let i = 0; i < ring.length - 1; i++) {
+        addEdge(ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1]);
+      }
+    }
+  }
+
+  // Build next-point and start-point lookups from remaining exterior edges
+  const nextPoint = new Map<string, [number, number]>();
+  const startPoints = new Map<string, [number, number]>();
+  for (const edge of edgeMap.values()) {
+    const fromKey = pk(edge.fx, edge.fy);
+    nextPoint.set(fromKey, [edge.tx, edge.ty]);
+    startPoints.set(fromKey, [edge.fx, edge.fy]);
+  }
+
+  const visited = new Set<string>();
+  const result: [number, number][][] = [];
+
+  for (const [startKey, startPt] of startPoints) {
+    if (visited.has(startKey)) continue;
+    const ring: [number, number][] = [startPt];
+    visited.add(startKey);
+    let cur = startPt;
+    for (let steps = 0; steps < 100000; steps++) {
+      const nxt = nextPoint.get(pk(cur[0], cur[1]));
+      if (!nxt) break;
+      const nxtKey = pk(nxt[0], nxt[1]);
+      if (nxtKey === startKey) break;
+      if (visited.has(nxtKey)) break;
+      ring.push(nxt);
+      visited.add(nxtKey);
+      cur = nxt;
+    }
+    if (ring.length >= 3) result.push([...ring, ring[0]]);
+  }
+
+  return result;
 }
 
 function randomId(): string {
@@ -455,8 +530,8 @@ function findDistrictLabel(
   const feature = geojson.features.find((item) => pointInGeometry(point, item.geometry));
   if (!feature) return null;
   if (level === "stadtbezirk") {
-    const value = feature.properties.STADTBEZIR ?? null;
-    return value ? value.trim() : null;
+    const raw = (feature.properties.STADTBEZIR ?? "").trim();
+    return STADTBEZIRK_MAP[raw] ?? null;
   }
   return bezirkForFeature(feature);
 }
@@ -998,6 +1073,35 @@ function App() {
 
   const activeAnswers = useMemo(() => Object.values(appliedAnswers), [appliedAnswers]);
 
+  const bezirkGroups = useMemo(() => {
+    if (!geojson) return new Map<string, [number, number][][]>();
+    const groups = new Map<string, StadtteilFeature[]>();
+    for (const feat of geojson.features) {
+      const name = bezirkForFeature(feat);
+      if (!name) continue;
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(feat);
+    }
+    const result = new Map<string, [number, number][][]>();
+    for (const [name, feats] of groups) result.set(name, dissolveFeatures(feats));
+    return result;
+  }, [geojson]);
+
+  const stadtbezirkGroups = useMemo(() => {
+    if (!geojson) return new Map<string, [number, number][][]>();
+    const groups = new Map<string, StadtteilFeature[]>();
+    for (const feat of geojson.features) {
+      const sb = (feat.properties.STADTBEZIR ?? "").trim();
+      const name = STADTBEZIRK_MAP[sb];
+      if (!name) continue;
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(feat);
+    }
+    const result = new Map<string, [number, number][][]>();
+    for (const [name, feats] of groups) result.set(name, dissolveFeatures(feats));
+    return result;
+  }, [geojson]);
+
   const filteredStops = useMemo(() => {
     if (activeAnswers.length === 0) return STOPS;
 
@@ -1332,11 +1436,11 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <h1>Hide and Seek Munster</h1>
+        <h1>Hide and Seek</h1>
         <div className="topbar-right">
           {role !== "landing" && (
             <button className="btn ghost" onClick={() => setRole("landing")}>
-              Zur Landing Page
+              Zur Startseite
             </button>
           )}
         </div>
@@ -1532,7 +1636,7 @@ function App() {
                 </div>
 
                 <div className="card" data-cat="matching">
-                  <h3>Matching Frage</h3>
+                  <h3>Matching</h3>
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="q-grid">
                     <button className={`q-btn${usedSubKeys.has("MATCH_DISTRICT_bezirk") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "bezirk" })}>Bezirk</button>
@@ -1554,7 +1658,7 @@ function App() {
                 </div>
 
                 <div className="card" data-cat="measuring">
-                  <h3>Measuring Frage</h3>
+                  <h3>Measuring</h3>
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="q-grid">
                     {MEASURE_TYPES.map((m) => (
@@ -1564,7 +1668,7 @@ function App() {
                 </div>
 
                 <div className="card" data-cat="foto">
-                  <h3>Foto Frage</h3>
+                  <h3>Foto</h3>
                   <p className="meta small">Belohnung: 1 Karte ziehen, 1 behalten · Zeitlimit: 10 min</p>
                   <div className="q-grid">
                     {FOTO_QUESTIONS.map((q) => (
@@ -1779,40 +1883,28 @@ function App() {
                 });
               })()}
 
-              {bezirkBorderVisible && geojson && geojson.features.flatMap((feature, fi) => {
-                const bezirk = bezirkForFeature(feature);
-                if (!bezirk) return [];
-                const color = districtColor(bezirk);
-                const toLL = (ring: number[][]): [number, number][] => ring.map(([lon, lat]) => [lat, lon]);
-                if (feature.geometry.type === "Polygon") {
-                  return [(
-                    <Polygon key={`bz-${fi}`} positions={(feature.geometry.coordinates as number[][][]).map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
-                      <Tooltip sticky>{bezirk}</Tooltip>
-                    </Polygon>
-                  )];
-                }
-                return (feature.geometry.coordinates as number[][][][]).map((poly, pi) => (
-                  <Polygon key={`bz-${fi}-${pi}`} positions={poly.map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
-                    <Tooltip sticky>{bezirk}</Tooltip>
+              {bezirkBorderVisible && [...bezirkGroups.entries()].flatMap(([name, rings]) => {
+                const color = districtColor(name);
+                return rings.map((ring, ri) => (
+                  <Polygon
+                    key={`bz-${name}-${ri}`}
+                    positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
+                  >
+                    {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
                   </Polygon>
                 ));
               })}
 
-              {stadtbezirkBorderVisible && geojson && geojson.features.flatMap((feature, fi) => {
-                const sb = (feature.properties.STADTBEZIR ?? "").trim();
-                if (!sb) return [];
-                const color = districtColor(sb);
-                const toLL = (ring: number[][]): [number, number][] => ring.map(([lon, lat]) => [lat, lon]);
-                if (feature.geometry.type === "Polygon") {
-                  return [(
-                    <Polygon key={`sb-${fi}`} positions={(feature.geometry.coordinates as number[][][]).map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
-                      <Tooltip sticky>{sb}</Tooltip>
-                    </Polygon>
-                  )];
-                }
-                return (feature.geometry.coordinates as number[][][][]).map((poly, pi) => (
-                  <Polygon key={`sb-${fi}-${pi}`} positions={poly.map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
-                    <Tooltip sticky>{sb}</Tooltip>
+              {stadtbezirkBorderVisible && [...stadtbezirkGroups.entries()].flatMap(([name, rings]) => {
+                const color = districtColor(name);
+                return rings.map((ring, ri) => (
+                  <Polygon
+                    key={`sb-${name}-${ri}`}
+                    positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
+                  >
+                    {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
                   </Polygon>
                 ));
               })}
