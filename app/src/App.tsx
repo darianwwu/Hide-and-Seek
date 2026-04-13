@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Circle, CircleMarker, MapContainer, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Pane, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { STOPS } from "./data/stops";
 
@@ -680,6 +680,16 @@ function isPointExcludedByAnswer(
   return false;
 }
 
+const ANSWER_TYPE_COST: Record<string, number> = {
+  RADAR: 0,
+  THERMO_PATH: 1,
+  MATCH_DISTRICT: 2,
+  MATCH_POI: 3,
+  MATCH_BUSLINE: 4,
+  MATCH_STREET: 5,
+  MEASURE: 6,
+};
+
 function isPointExcluded(
   pos: Position,
   answers: AnswerCode[],
@@ -782,6 +792,12 @@ function ExclusionOverlay({
 
     if (answers.length === 0) return;
 
+    const hasMeasure = answers.some((a) => {
+      const q = questions[a.qid];
+      return q?.type === "MEASURE";
+    });
+    const step = hasMeasure ? 8 : 4;
+
     const ExclusionGrid = L.GridLayer.extend({
       createTile(coords: L.Coords) {
         const tile = document.createElement("canvas");
@@ -792,7 +808,6 @@ function ExclusionOverlay({
         const ctx = tile.getContext("2d");
         if (!ctx) return tile;
 
-        const step = 4;
         ctx.fillStyle = "rgba(50, 50, 50, 0.45)";
 
         for (let x = 0; x < size.x; x += step) {
@@ -983,6 +998,7 @@ function App() {
   const [selectedStopId, setSelectedStopId] = useState<string>(() => lsGet("hs_hideout", ""));
 
   const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
+  const [previewStopId, setPreviewStopId] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const [hiderInputCode, setHiderInputCode] = useState("");
@@ -1135,7 +1151,16 @@ function App() {
     setThermoTracking((prev) => ({ ...prev, walkedKm: nextWalked, lastPos: currentPos }));
   }, [currentPos, thermoTracking]);
 
-  const activeAnswers = useMemo(() => Object.values(appliedAnswers), [appliedAnswers]);
+  const activeAnswers = useMemo(() => {
+    const answers = Object.values(appliedAnswers);
+    const codes = askedCodes;
+    answers.sort((a, b) => {
+      const qa = codes[a.qid];
+      const qb = codes[b.qid];
+      return (ANSWER_TYPE_COST[qa?.type ?? ""] ?? 99) - (ANSWER_TYPE_COST[qb?.type ?? ""] ?? 99);
+    });
+    return answers;
+  }, [appliedAnswers, askedCodes]);
 
   const bezirkGroups = useMemo(() => {
     if (!geojson) return new Map<string, [number, number][][]>();
@@ -1573,7 +1598,7 @@ function App() {
                 <p className="meta">Wahle eine Haltestelle auf der Karte als Versteck.</p>
                 <div className="row">
                   <label>Aktuelles Versteck</label>
-                  <strong>{selectedStop?.name ?? "Noch nicht gewahlt"}</strong>
+                  <strong>{selectedStop?.name ?? "Noch nicht gewaehlt"}</strong>
                 </div>
 
                 {hiderAnswerCode && (
@@ -2021,39 +2046,57 @@ function App() {
 
                 // Hider (no hideout yet) or Seeker: show all stops
                 const stopsToShow = role === "hider" ? STOPS : displayedStops;
-                return stopsToShow.map((stop) => {
-                  const seekerOut = role === "seeker" && !filteredStops.some((item) => item.id === stop.id);
-                  return (
-                    <CircleMarker
-                      key={stop.id}
-                      center={[stop.lat, stop.lon]}
-                      radius={6}
-                      pathOptions={{
-                        color: "#7f1d1d",
-                        weight: 1.4,
-                        fillColor: seekerOut ? "#cbd5e1" : "#dc2626",
-                        fillOpacity: seekerOut ? 0.25 : 0.9,
-                      }}
-                      eventHandlers={{}}
-                    >
-                      <Popup>
-                        <b>{stop.name}</b>
-                        {role === "hider" && (
-                          <>
-                            <br />
-                            <button
-                              className="btn"
-                              style={{ marginTop: 8, width: "100%" }}
-                              onClick={() => setConfirmStopId(stop.id)}
-                            >
-                              Als Versteck auswählen
-                            </button>
-                          </>
-                        )}
-                      </Popup>
-                    </CircleMarker>
-                  );
-                });
+                const previewStop = role === "hider" && previewStopId ? STOPS.find((s) => s.id === previewStopId) : null;
+                return (
+                  <>
+                    {previewStop && (
+                      <Pane name="radiusPreview" style={{ zIndex: 350 }}>
+                        <Circle
+                          center={[previewStop.lat, previewStop.lon]}
+                          radius={HIDE_RADIUS_M}
+                          pathOptions={{ color: "#0f172a", weight: 1.5, fillColor: "#94a3b8", fillOpacity: 0.15 }}
+                          interactive={false}
+                        />
+                      </Pane>
+                    )}
+                    {stopsToShow.map((stop) => {
+                      const seekerOut = role === "seeker" && !filteredStops.some((item) => item.id === stop.id);
+                      return (
+                        <CircleMarker
+                          key={stop.id}
+                          center={[stop.lat, stop.lon]}
+                          radius={6}
+                          pathOptions={{
+                            color: "#7f1d1d",
+                            weight: 1.4,
+                            fillColor: seekerOut ? "#cbd5e1" : "#dc2626",
+                            fillOpacity: seekerOut ? 0.25 : 0.9,
+                          }}
+                          eventHandlers={role === "hider" ? {
+                            popupopen: () => setPreviewStopId(stop.id),
+                            popupclose: () => setPreviewStopId(null),
+                          } : {}}
+                        >
+                          <Popup>
+                            <b>{stop.name}</b>
+                            {role === "hider" && (
+                              <>
+                                <br />
+                                <button
+                                  className="btn"
+                                  style={{ marginTop: 8, width: "100%" }}
+                                  onClick={() => setConfirmStopId(stop.id)}
+                                >
+                                  Als Versteck auswählen
+                                </button>
+                              </>
+                            )}
+                          </Popup>
+                        </CircleMarker>
+                      );
+                    })}
+                  </>
+                );
               })()}
 
               {bezirkBorderVisible && [...bezirkGroups.entries()].flatMap(([name, rings]) => {
