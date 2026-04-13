@@ -423,7 +423,7 @@ test.describe("Hider Question Overview", () => {
     await waitForGps(page);
     await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     await page.locator("button.poi-menu-toggle", { hasText: /Fragen/ }).click();
-    const radarBtn = page.locator(".hider-overview .q-btn").filter({ hasText: "Radar" }).first();
+    const radarBtn = page.locator(".hider-overview .q-btn").filter({ hasText: "1 km" }).first();
     await expect(radarBtn).toHaveClass(/q-btn--used/);
   });
 
@@ -433,7 +433,7 @@ test.describe("Hider Question Overview", () => {
     await selectRole(page, "hider");
     await waitForGps(page);
     await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
-    await page.getByPlaceholder(PH).fill("RADAR_CD34_51.96250;7.62830;0,5km");
+    await page.getByPlaceholder(PH).fill("RADAR_CD34_51.96250;7.62830;1km");
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
     await expect(page.getByText(/doppelte Belohnung/)).toBeVisible();
   });

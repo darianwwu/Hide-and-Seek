@@ -264,7 +264,8 @@ function encodeQuestionCode(payload: QuestionCode): string {
   if (payload.type === "THERMO_PATH") {
     const start = payload.payload.start as [number, number];
     const end = payload.payload.end as [number, number];
-    return `THERMO_${payload.qid}_${formatCoord(start[0])};${formatCoord(start[1])}_${formatCoord(end[0])};${formatCoord(end[1])}`;
+    const targetKm = Number(payload.payload.targetKm);
+    return `THERMO_${payload.qid}_${formatCoord(start[0])};${formatCoord(start[1])}_${formatCoord(end[0])};${formatCoord(end[1])}_${formatKmLocale(targetKm)}km`;
   }
   if (payload.type === "MATCH_DISTRICT") {
     const level = payload.payload.level as MatchLevel;
@@ -323,12 +324,14 @@ function decodeCode(raw: string): QuestionCode | AnswerCode {
     return { qid: radarQ[1].toUpperCase(), type: "RADAR", payload: { center, radiusKm: parseLocaleNumber(radarQ[3]) } };
   }
 
-  const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)(?:_(\d+(?:[\.,]\d+)?)km)?$/i);
   if (thermoQ) {
+    const payload: Record<string, unknown> = { start: parseCoordPair(thermoQ[2]), end: parseCoordPair(thermoQ[3]) };
+    if (thermoQ[4]) payload.targetKm = parseLocaleNumber(thermoQ[4]);
     return {
       qid: thermoQ[1].toUpperCase(),
       type: "THERMO_PATH",
-      payload: { start: parseCoordPair(thermoQ[2]), end: parseCoordPair(thermoQ[3]) },
+      payload,
     };
   }
 
@@ -887,10 +890,15 @@ const FOTO_QUESTIONS: { id: string; label: string; description: string }[] = [
 type QCatEntry = { subKey: string; label: string; reward: string; time: string };
 const QUESTION_CATEGORIES: { group: string; reward: string; time: string; items: QCatEntry[] }[] = [
   { group: "Radar", reward: "2 Karten ziehen, 1 behalten", time: "3 min", items: [
-    { subKey: "RADAR", label: "Radar", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "RADAR_0.25", label: "250 m", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "RADAR_0.5", label: "500 m", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "RADAR_1", label: "1 km", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "RADAR_2", label: "2 km", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "RADAR_custom", label: "Custom", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
   ]},
   { group: "Thermometer", reward: "2 Karten ziehen, 1 behalten", time: "3 min", items: [
-    { subKey: "THERMO_PATH", label: "Thermometer", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "THERMO_PATH_0.75", label: "750 m", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "THERMO_PATH_1.5", label: "1,5 km", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
   ]},
   { group: "Matching", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
     { subKey: "MATCH_DISTRICT_bezirk", label: "Bezirk", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
@@ -917,7 +925,17 @@ function doubleReward(reward: string): string {
   return reward.replace(/(\d+)/g, (_, n) => String(Number(n) * 2));
 }
 
+const RADAR_PRESETS = new Set(["0.25", "0.5", "1", "2"]);
+
 function questionSubKey(type: QuestionType, payload: Record<string, unknown>): string {
+  if (type === "RADAR") {
+    const r = String(payload.radiusKm);
+    return RADAR_PRESETS.has(r) ? `RADAR_${r}` : "RADAR_custom";
+  }
+  if (type === "THERMO_PATH") {
+    const t = String(payload.targetKm ?? "");
+    return t ? `THERMO_PATH_${t}` : "THERMO_PATH";
+  }
   if (type === "MATCH_DISTRICT") return `MATCH_DISTRICT_${payload.level as string}`;
   if (type === "MATCH_POI") return `MATCH_POI_${payload.poiType as string}`;
   if (type === "MATCH_BUSLINE") return `MATCH_BUSLINE_${payload.lineName as string}`;
@@ -1244,6 +1262,7 @@ function App() {
       payload = {
         start: [thermoStart.lat, thermoStart.lon],
         end: [thermoEnd.lat, thermoEnd.lon],
+        targetKm: thermoTracking.targetKm,
       };
     }
 
@@ -1520,6 +1539,7 @@ function App() {
         return;
       }
       setAppliedAnswers((prev) => ({ ...prev, [decoded.qid]: decoded }));
+      setAnswerInput("");
       setAnswerFeedback("Antwort angewendet. Karte wurde gefiltert.");
     } catch (err) {
       setAnswerFeedback(`Antwort ungültig: ${(err as Error).message}`);
@@ -1797,7 +1817,7 @@ function App() {
                     />
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
-                  <button className={`q-btn${qBtnCls("RADAR", usedSubKeys)}`} onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
+                  <button className={`q-btn${qBtnCls(radarPreset === "custom" ? "RADAR_custom" : `RADAR_${radarPreset}`, usedSubKeys)}`} onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
                 </div>
 
                 <div className="card" data-cat="thermo">
@@ -1825,7 +1845,7 @@ function App() {
                     )}
                   </p>
                   <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
-                  <button className={`q-btn${qBtnCls("THERMO_PATH", usedSubKeys)}`} onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
+                  <button className={`q-btn${qBtnCls(`THERMO_PATH_${thermoTracking.targetKm}`, usedSubKeys)}`} onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
                 </div>
 
                 <div className="card" data-cat="matching">
@@ -2046,7 +2066,7 @@ function App() {
 
                 // Hider (no hideout yet) or Seeker: show all stops
                 const stopsToShow = role === "hider" ? STOPS : displayedStops;
-                const previewStop = role === "hider" && previewStopId ? STOPS.find((s) => s.id === previewStopId) : null;
+                const previewStop = previewStopId ? STOPS.find((s) => s.id === previewStopId) ?? null : null;
                 return (
                   <>
                     {previewStop && (
@@ -2072,10 +2092,10 @@ function App() {
                             fillColor: seekerOut ? "#cbd5e1" : "#dc2626",
                             fillOpacity: seekerOut ? 0.25 : 0.9,
                           }}
-                          eventHandlers={role === "hider" ? {
+                          eventHandlers={{
                             popupopen: () => setPreviewStopId(stop.id),
                             popupclose: () => setPreviewStopId(null),
-                          } : {}}
+                          }}
                         >
                           <Popup>
                             <b>{stop.name}</b>
