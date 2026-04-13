@@ -859,15 +859,48 @@ function renderType(type: QuestionType): string {
 
 type QuestionPreview = { text: string; reward: string; time: string; doubled: boolean };
 
-const FOTO_QUESTIONS: { id: string; label: string }[] = [
-  { id: "gebaeude", label: "Gebäude" },
-  { id: "breiteste_strasse", label: "Breiteste Straße" },
-  { id: "baum", label: "Baum" },
-  { id: "groesste_struktur", label: "Größte Struktur" },
-  { id: "selfie", label: "Selfie" },
-  { id: "himmel", label: "Himmel" },
-  { id: "bushaltestelle", label: "Bushaltestelle" },
+const FOTO_QUESTIONS: { id: string; label: string; description: string }[] = [
+  { id: "gebaeude", label: "Gebäude", description: "Irgendein Gebäude was du aus deiner aktuellen Position aus sehen kannst. Es müssen beide Seiten und das Dach zu sehen sein und das Dach muss im oberen Drittel des Bildes liegen." },
+  { id: "breiteste_strasse", label: "Breiteste Straße", description: "Die breiteste Straße in deinem Gebiet. Muss beide Seiten der Straße beinhalten." },
+  { id: "baum", label: "Baum", description: "Muss den ganzen Baum vom Boden bis zur Spitze beinhalten." },
+  { id: "groesste_struktur", label: "Größte Struktur", description: "Foto von dem höchsten Objekt in deiner aktuellen Sichtlinie. Wenn möglich, müssen beide Seiten zu sehen sein." },
+  { id: "selfie", label: "Selfie", description: "Ein Selfie von dir, Arm ganz ausgestreckt und parallel zum Boden." },
+  { id: "himmel", label: "Himmel", description: "Handy parallel zum Boden und direkt nach oben fotografieren." },
+  { id: "bushaltestelle", label: "Bushaltestelle", description: "Deine Bushaltestelle, Häuschen oder Bank muss ganz zu sehen sein." },
 ];
+
+type QCatEntry = { subKey: string; label: string; reward: string; time: string };
+const QUESTION_CATEGORIES: { group: string; reward: string; time: string; items: QCatEntry[] }[] = [
+  { group: "Radar", reward: "2 Karten ziehen, 1 behalten", time: "3 min", items: [
+    { subKey: "RADAR", label: "Radar", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+  ]},
+  { group: "Thermometer", reward: "2 Karten ziehen, 1 behalten", time: "3 min", items: [
+    { subKey: "THERMO_PATH", label: "Thermometer", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
+  ]},
+  { group: "Matching", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
+    { subKey: "MATCH_DISTRICT_bezirk", label: "Bezirk", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
+    { subKey: "MATCH_DISTRICT_stadtbezirk", label: "Stadtbezirk", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
+    ...POI_LAYERS.map((l) => ({ subKey: `MATCH_POI_${l.id}`, label: l.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
+    { subKey: "MATCH_STREET", label: "Straße", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
+  ]},
+  { group: "Measuring", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
+    ...MEASURE_TYPES.map((m) => ({ subKey: `MEASURE_${m.id}`, label: m.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
+  ]},
+  { group: "Foto", reward: "1 Karte ziehen, 1 behalten", time: "10 min", items: [
+    ...FOTO_QUESTIONS.map((q) => ({ subKey: `FOTO_${q.id}`, label: q.label, reward: "1 Karte ziehen, 1 behalten", time: "10 min" })),
+  ]},
+];
+
+function qBtnCls(key: string, counts: Map<string, number>): string {
+  const c = counts.get(key) ?? 0;
+  if (c >= 2) return " q-btn--exhausted";
+  if (c >= 1) return " q-btn--used";
+  return "";
+}
+
+function doubleReward(reward: string): string {
+  return reward.replace(/(\d+)/g, (_, n) => String(Number(n) * 2));
+}
 
 function questionSubKey(type: QuestionType, payload: Record<string, unknown>): string {
   if (type === "MATCH_DISTRICT") return `MATCH_DISTRICT_${payload.level as string}`;
@@ -906,7 +939,7 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
     const poiType = decoded.payload.poiType as string;
     const name = decoded.payload.nearestName as string;
     const label = POI_LAYERS.find((l) => l.id === poiType)?.label ?? poiType;
-    return { text: `Ist unser nächster ${label} \u201e${name}\u201c auch dein nächster ${label}?`, reward, time, doubled: false };
+    return { text: `Ist unser/e nächste/r ${label} \u201e${name}\u201c auch dein/e nächste/r ${label}?`, reward, time, doubled: false };
   }
   if (decoded.type === "MATCH_BUSLINE") {
     const line = decoded.payload.lineName as string;
@@ -921,23 +954,44 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
     const distKm = Number(decoded.payload.distKm);
     const meters = Math.round(distKm * 1000);
     const label = MEASURE_TYPES.find((m) => m.id === mt)?.label ?? mt;
-    return { text: `Wir sind ${meters} Meter von einem ${label} entfernt. Bist du näher dran oder weiter entfernt von einem ${label} als wir?`, reward, time, doubled: false };
+    return { text: `Wir sind ${meters} Meter von einer/m ${label} entfernt. Bist du näher dran oder weiter entfernt von einer/m ${label} als wir?`, reward, time, doubled: false };
   }
   return { text: "Unbekannte Frage", reward: "", time: "", doubled: false };
 }
 
 function App() {
-  const [role, setRole] = useState<Role>(() => (localStorage.getItem("hs_role") as Role) || "landing");
+  // --- localStorage helpers ---
+  function lsGet<T>(key: string, fallback: T, reviver?: (raw: unknown) => T): T {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null) return fallback;
+      const parsed = JSON.parse(raw);
+      return reviver ? reviver(parsed) : (parsed as T);
+    } catch { return fallback; }
+  }
+  function lsSet(key: string, value: unknown): void {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota */ }
+  }
+  function mapReviver(raw: unknown): Map<string, number> {
+    if (Array.isArray(raw)) return new Map(raw as [string, number][]);
+    return new Map();
+  }
+
+  const [role, setRole] = useState<Role>(() => lsGet<Role>("hs_role", "landing"));
   const [geojson, setGeojson] = useState<StadtteileCollection | null>(null);
   const [geojsonError, setGeojsonError] = useState<string>("");
-  const [selectedStopId, setSelectedStopId] = useState<string>(() => localStorage.getItem("hs_hideout") || "");
+  const [selectedStopId, setSelectedStopId] = useState<string>(() => lsGet("hs_hideout", ""));
 
   const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const [hiderInputCode, setHiderInputCode] = useState("");
   const [hiderFeedback, setHiderFeedback] = useState("");
   const [hiderAnswerCode, setHiderAnswerCode] = useState("");
   const [questionPreview, setQuestionPreview] = useState<QuestionPreview | null>(null);
+  const [hiderUsedSubKeys, setHiderUsedSubKeys] = useState<Map<string, number>>(() => lsGet("hs_hiderUsed", new Map<string, number>(), mapReviver));
+  const [hiderOverviewOpen, setHiderOverviewOpen] = useState(false);
+  const [hiderFotoConfirm, setHiderFotoConfirm] = useState<{ id: string; label: string; description: string } | null>(null);
 
   const [radarPreset, setRadarPreset] = useState<RadarPreset>("1");
   const [radarCustomKmInput, setRadarCustomKmInput] = useState("0,2");
@@ -953,11 +1007,11 @@ function App() {
   const selectedPoiType = POI_LAYERS[0].id;
   const [selectedBusLine, setSelectedBusLine] = useState<string>("");
   const selectedMeasureType: MeasureType = "kitas";
-  const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, boolean>>({});
+  const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, number>>(() => lsGet("hs_usedFoto", {}));
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
 
-  const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>({});
-  const [latestQuestionCode, setLatestQuestionCode] = useState("");
+  const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>(() => lsGet("hs_askedCodes", {}));
+  const [latestQuestionCode, setLatestQuestionCode] = useState(() => lsGet("hs_latestCode", ""));
   const questionCodeRowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (latestQuestionCode) {
@@ -966,15 +1020,18 @@ function App() {
   }, [latestQuestionCode]);
   const [answerInput, setAnswerInput] = useState("");
   const [answerFeedback, setAnswerFeedback] = useState("");
-  const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>({});
+  const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>(() => lsGet("hs_appliedAnswers", {}));
 
   const usedSubKeys = useMemo(
-    () =>
-      new Set(
-        Object.keys(appliedAnswers)
-          .filter((qid) => askedCodes[qid])
-          .map((qid) => questionSubKey(askedCodes[qid].type, askedCodes[qid].payload)),
-      ),
+    () => {
+      const counts = new Map<string, number>();
+      for (const qid of Object.keys(appliedAnswers)) {
+        if (!askedCodes[qid]) continue;
+        const key = questionSubKey(askedCodes[qid].type, askedCodes[qid].payload);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      return counts;
+    },
     [appliedAnswers, askedCodes],
   );
 
@@ -1037,6 +1094,13 @@ function App() {
   useEffect(() => {
     if (selectedStopId) localStorage.setItem("hs_hideout", selectedStopId);
   }, [selectedStopId]);
+
+  // Persist game state
+  useEffect(() => { lsSet("hs_hiderUsed", [...hiderUsedSubKeys.entries()]); }, [hiderUsedSubKeys]);
+  useEffect(() => { lsSet("hs_usedFoto", usedFotoQuestions); }, [usedFotoQuestions]);
+  useEffect(() => { lsSet("hs_askedCodes", askedCodes); }, [askedCodes]);
+  useEffect(() => { lsSet("hs_latestCode", latestQuestionCode); }, [latestQuestionCode]);
+  useEffect(() => { lsSet("hs_appliedAnswers", appliedAnswers); }, [appliedAnswers]);
 
   const selectedStop = useMemo(() => STOPS.find((stop) => stop.id === selectedStopId) || null, [selectedStopId]);
   const radarKm = useMemo(() => {
@@ -1406,6 +1470,12 @@ function App() {
 
       setHiderFeedback(feedback);
       setHiderAnswerCode(encodeAnswerCode(answerCode));
+      const subKey = questionSubKey(decoded.type, decoded.payload);
+      setHiderUsedSubKeys((prev) => {
+        const next = new Map(prev);
+        next.set(subKey, (prev.get(subKey) ?? 0) + 1);
+        return next;
+      });
       setHiderInputCode("");
       setQuestionPreview(null);
     } catch (err) {
@@ -1448,8 +1518,7 @@ function App() {
 
       {role === "landing" && (
         <main className="landing">
-          <h2>Rolle auswahlen</h2>
-          <p>Starte als Verstecker oder Sucher. Beide nutzen dieselbe Karte und denselben Code-Standard.</p>
+          <h2>Rolle auswaehlen</h2>
           <div className="landing-actions">
             <button className="btn" onClick={() => setRole("hider")}>
               Verstecker
@@ -1458,6 +1527,40 @@ function App() {
               Sucher
             </button>
           </div>
+          <button
+            className="btn ghost"
+            style={{ marginTop: 24, fontSize: "0.82rem" }}
+            onClick={() => setShowResetConfirm(true)}
+          >
+            Spiel zuruecksetzen
+          </button>
+
+          {showResetConfirm && (
+            <div className="question-preview-overlay" onClick={() => setShowResetConfirm(false)}>
+              <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
+                <p className="question-preview-text">Bist du sicher, dass du das Spiel zurecksetzen moechtest? Alle Daten gehen verloren.</p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn" style={{ flex: 1, background: "#dc2626", borderColor: "#dc2626" }} onClick={() => {
+                    const keys = ["hs_role", "hs_hideout", "hs_hiderUsed", "hs_usedFoto", "hs_askedCodes", "hs_latestCode", "hs_appliedAnswers"];
+                    keys.forEach((k) => localStorage.removeItem(k));
+                    setSelectedStopId("");
+                    setHiderUsedSubKeys(new Map());
+                    setUsedFotoQuestions({});
+                    setAskedCodes({});
+                    setLatestQuestionCode("");
+                    setAppliedAnswers({});
+                    setHiderInputCode("");
+                    setHiderFeedback("");
+                    setHiderAnswerCode("");
+                    setAnswerInput("");
+                    setAnswerFeedback("");
+                    setShowResetConfirm(false);
+                  }}>Ja, zuruecksetzen</button>
+                  <button className="btn ghost" style={{ flex: 1 }} onClick={() => setShowResetConfirm(false)}>Abbrechen</button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       )}
 
@@ -1495,7 +1598,7 @@ function App() {
                           if ("payload" in decoded) {
                             const preview = translateQuestionCode(decoded);
                             const subKey = questionSubKey(decoded.type, decoded.payload);
-                            const doubled = usedSubKeys.has(subKey);
+                            const doubled = (hiderUsedSubKeys.get(subKey) ?? 0) >= 1;
                             setQuestionPreview({ ...preview, doubled });
                           }
                         } catch {
@@ -1511,7 +1614,7 @@ function App() {
                     <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
                       <p className="question-preview-text">{questionPreview.text}</p>
                       <div className="question-preview-meta">
-                        <span>🎴 {questionPreview.doubled ? <><s>{questionPreview.reward}</s> <strong style={{color:"#16a34a"}}>{questionPreview.reward.replace(/\d+(?= Karten)/, (n) => String(Number(n)*2))}</strong> (2×)</> : questionPreview.reward}</span>
+                        <span>🎴 {questionPreview.doubled ? <><s>{questionPreview.reward}</s> <strong style={{color:"#16a34a"}}>{doubleReward(questionPreview.reward)}</strong> (2×)</> : questionPreview.reward}</span>
                         <span>⏱️ {questionPreview.time}</span>
                       </div>
                       {questionPreview.doubled && (
@@ -1565,16 +1668,81 @@ function App() {
                   );
                 })()}
 
-                <div className="card">
-                  <h3>Belohnungen &amp; Zeitlimits</h3>
-                  <ul className="foto-fragen-list">
-                    <li><strong>Radar</strong> — 2 Karten ziehen, 1 behalten · 3 min</li>
-                    <li><strong>Thermometer</strong> — 2 Karten ziehen, 1 behalten · 3 min</li>
-                    <li><strong>Matching</strong> — 3 Karten ziehen, 1 behalten · 3 min</li>
-                    <li><strong>Measuring</strong> — 3 Karten ziehen, 1 behalten · 3 min</li>
-                    <li><strong>Foto</strong> — 1 Karte ziehen, 1 behalten · 10 min</li>
-                  </ul>
+                <div className="poi-menu">
+                  <button className="poi-menu-toggle" onClick={() => setHiderOverviewOpen((v) => !v)}>
+                    <span className="poi-menu-arrow">{hiderOverviewOpen ? "▾" : "▸"}</span>
+                    Fragenübersicht
+                  </button>
+                  {hiderOverviewOpen && (
+                    <div className="hider-overview">
+                      {QUESTION_CATEGORIES.map((cat) => {
+                        const anyUsed = cat.items.some((item) => (hiderUsedSubKeys.get(item.subKey) ?? 0) >= 1);
+                        return (
+                        <div key={cat.group} className="hider-overview-group">
+                          <h4>{cat.group} <span className="hider-overview-reward">🎴 {anyUsed ? doubleReward(cat.reward) : cat.reward} · ⏱️ {cat.time}</span></h4>
+                          <div className="q-grid">
+                            {cat.items.map((item) => {
+                              const count = hiderUsedSubKeys.get(item.subKey) ?? 0;
+                              const cls = count >= 2 ? " q-btn--exhausted" : count >= 1 ? " q-btn--used" : "";
+                              const isFoto = item.subKey.startsWith("FOTO_");
+                              return (
+                                <button
+                                  key={item.subKey}
+                                  className={`q-btn q-btn--overview${cls}`}
+                                  onClick={isFoto ? () => {
+                                    const fotoId = item.subKey.replace("FOTO_", "");
+                                    const fq = FOTO_QUESTIONS.find((q) => q.id === fotoId);
+                                    setHiderFotoConfirm(fq ?? null);
+                                  } : () => {}}
+                                  style={isFoto ? { cursor: "pointer" } : {}}
+                                >
+                                  <span className="q-btn-label">{item.label}</span>
+                                  {count > 0 && <span className="q-btn-count">{count}×</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
+
+                {hiderFotoConfirm !== null && (
+                  <div className="question-preview-overlay" onClick={() => setHiderFotoConfirm(null)}>
+                    <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const subKey = `FOTO_${hiderFotoConfirm.id}`;
+                        const count = hiderUsedSubKeys.get(subKey) ?? 0;
+                        return (
+                          <>
+                            <p className="question-preview-text">Foto-Frage: <strong>{hiderFotoConfirm.label}</strong></p>
+                            <p className="meta small" style={{ margin: "0 0 8px" }}>{hiderFotoConfirm.description}</p>
+                            <div className="question-preview-meta">
+                              <span>🎴 {count >= 1 ? <><s>1 Karte ziehen, 1 behalten</s> <strong style={{color:"#16a34a"}}>2 Karten ziehen, 2 behalten</strong> (2×)</> : "1 Karte ziehen, 1 behalten"}</span>
+                              <span>⏱️ 10 min</span>
+                            </div>
+                            {count >= 1 && (
+                              <p className="meta small" style={{ color: "#b45309", margin: 0 }}>⚠️ Diese Frage wurde bereits gestellt – doppelte Belohnung!</p>
+                            )}
+                            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                              <button className="btn" style={{ flex: 1 }} onClick={() => {
+                                setHiderUsedSubKeys((prev) => {
+                                  const next = new Map(prev);
+                                  next.set(subKey, (prev.get(subKey) ?? 0) + 1);
+                                  return next;
+                                });
+                                setHiderFotoConfirm(null);
+                              }}>Als gestellt markieren</button>
+                              <button className="btn ghost" style={{ flex: 1 }} onClick={() => setHiderFotoConfirm(null)}>Schließen</button>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -1604,7 +1772,7 @@ function App() {
                     />
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
-                  <button className={`q-btn${usedSubKeys.has("RADAR") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
+                  <button className={`q-btn${qBtnCls("RADAR", usedSubKeys)}`} onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
                 </div>
 
                 <div className="card" data-cat="thermo">
@@ -1632,19 +1800,19 @@ function App() {
                     )}
                   </p>
                   <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
-                  <button className={`q-btn${usedSubKeys.has("THERMO_PATH") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
+                  <button className={`q-btn${qBtnCls("THERMO_PATH", usedSubKeys)}`} onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
                 </div>
 
                 <div className="card" data-cat="matching">
                   <h3>Matching</h3>
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="q-grid">
-                    <button className={`q-btn${usedSubKeys.has("MATCH_DISTRICT_bezirk") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "bezirk" })}>Bezirk</button>
-                    <button className={`q-btn${usedSubKeys.has("MATCH_DISTRICT_stadtbezirk") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "stadtbezirk" })}>Stadtbezirk</button>
+                    <button className={`q-btn${qBtnCls("MATCH_DISTRICT_bezirk", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "bezirk" })}>Bezirk</button>
+                    <button className={`q-btn${qBtnCls("MATCH_DISTRICT_stadtbezirk", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "stadtbezirk" })}>Stadtbezirk</button>
                     {POI_LAYERS.map((l) => (
-                      <button key={l.id} className={`q-btn${usedSubKeys.has(`MATCH_POI_${l.id}`) ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_POI", { poiType: l.id })}>{l.label}</button>
+                      <button key={l.id} className={`q-btn${qBtnCls(`MATCH_POI_${l.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MATCH_POI", { poiType: l.id })}>{l.label}</button>
                     ))}
-                    <button className={`q-btn${usedSubKeys.has("MATCH_STREET") ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_STREET")}>Straße</button>
+                    <button className={`q-btn${qBtnCls("MATCH_STREET", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_STREET")}>Straße</button>
                   </div>
                   <div className="q-busline-row">
                     <select value={selectedBusLine} onChange={(e) => setSelectedBusLine(e.target.value)}>
@@ -1653,7 +1821,7 @@ function App() {
                         <option key={f.properties.route_id} value={f.properties.name}>Linie {f.properties.name}</option>
                       ))}
                     </select>
-                    <button className={`q-btn${selectedBusLine && usedSubKeys.has(`MATCH_BUSLINE_${selectedBusLine}`) ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MATCH_BUSLINE")}>Buslinie →</button>
+                    <button className={`q-btn${selectedBusLine ? qBtnCls(`MATCH_BUSLINE_${selectedBusLine}`, usedSubKeys) : ""}`} onClick={() => generateQuestion("MATCH_BUSLINE")}>Buslinie →</button>
                   </div>
                 </div>
 
@@ -1662,7 +1830,7 @@ function App() {
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="q-grid">
                     {MEASURE_TYPES.map((m) => (
-                      <button key={m.id} className={`q-btn${usedSubKeys.has(`MEASURE_${m.id}`) ? " q-btn--used" : ""}`} onClick={() => generateQuestion("MEASURE", { measureType: m.id })}>{m.label}</button>
+                      <button key={m.id} className={`q-btn${qBtnCls(`MEASURE_${m.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MEASURE", { measureType: m.id })}>{m.label}</button>
                     ))}
                   </div>
                 </div>
@@ -1672,24 +1840,29 @@ function App() {
                   <p className="meta small">Belohnung: 1 Karte ziehen, 1 behalten · Zeitlimit: 10 min</p>
                   <div className="q-grid">
                     {FOTO_QUESTIONS.map((q) => (
-                      <button key={q.id} className={`q-btn${usedFotoQuestions[q.id] ? " q-btn--used" : ""}`} onClick={() => setFotoConfirmQuestion(q.id)}>{q.label}</button>
+                      <button key={q.id} className={`q-btn${(usedFotoQuestions[q.id] ?? 0) >= 2 ? " q-btn--exhausted" : (usedFotoQuestions[q.id] ?? 0) >= 1 ? " q-btn--used" : ""}`} onClick={() => setFotoConfirmQuestion(q.id)}>{q.label}</button>
                     ))}
                   </div>
                 </div>
 
                 {fotoConfirmQuestion !== null && (() => {
                   const fq = FOTO_QUESTIONS.find((q) => q.id === fotoConfirmQuestion);
+                  const fotoCount = usedFotoQuestions[fotoConfirmQuestion] ?? 0;
                   return (
                     <div className="question-preview-overlay" onClick={() => setFotoConfirmQuestion(null)}>
                       <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
                         <p className="question-preview-text">Foto-Frage stellen: <strong>{fq?.label}</strong>?</p>
+                        {fq && <p className="meta small" style={{ margin: "0 0 8px" }}>{fq.description}</p>}
                         <div className="question-preview-meta">
-                          <span>🎴 1 Karte ziehen, 1 behalten</span>
+                          <span>🎴 {fotoCount >= 1 ? <><s>1 Karte ziehen, 1 behalten</s> <strong style={{color:"#16a34a"}}>2 Karten ziehen, 2 behalten</strong> (2×)</> : "1 Karte ziehen, 1 behalten"}</span>
                           <span>⏱️ 10 min</span>
                         </div>
+                        {fotoCount >= 1 && (
+                          <p className="meta small" style={{ color: "#b45309", margin: 0 }}>⚠️ Diese Frage wurde bereits gestellt – doppelte Belohnung!</p>
+                        )}
                         <div style={{ display: "flex", gap: 8 }}>
                           <button className="btn" style={{ flex: 1 }} onClick={() => {
-                            setUsedFotoQuestions((prev) => ({ ...prev, [fotoConfirmQuestion]: true }));
+                            setUsedFotoQuestions((prev) => ({ ...prev, [fotoConfirmQuestion]: (prev[fotoConfirmQuestion] ?? 0) + 1 }));
                             setFotoConfirmQuestion(null);
                           }}>Ja, stellen</button>
                           <button className="btn ghost" style={{ flex: 1 }} onClick={() => setFotoConfirmQuestion(null)}>Abbrechen</button>
