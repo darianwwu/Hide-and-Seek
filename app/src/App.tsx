@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Circle, CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { STOPS } from "./data/stops";
 
@@ -88,11 +88,11 @@ const POI_LAYERS: PoiLayerConfig[] = [
 ];
 
 const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
-  ...POI_LAYERS.map((l) => ({ id: l.id as MeasureType, label: l.label })),
-  { id: "busline", label: "Buslinie" },
-  { id: "street", label: "Straße" },
   { id: "border_bezirk", label: "Bezirksgrenze" },
   { id: "border_stadtbezirk", label: "Stadtbezirksgrenze" },
+  ...POI_LAYERS.map((l) => ({ id: l.id as MeasureType, label: l.label })),
+  { id: "street", label: "Straße" },
+  { id: "busline", label: "Buslinie" },
 ];
 
 const GROUP_MAP: Record<string, string> = {
@@ -144,6 +144,13 @@ const GROUP_MAP: Record<string, string> = {
 };
 
 const EXCLUDED_DISTRICTS = new Set(["Sprakel", "Nienberge", "Roxel", "Albachten", "Amelsbüren", "Wolbeck"]);
+
+const DISTRICT_COLORS = ["#e53935","#7b1fa2","#1565c0","#00695c","#e65100","#283593","#006064","#2e7d32","#f57f17","#4e342e","#0277bd","#558b2f"];
+function districtColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff;
+  return DISTRICT_COLORS[hash % DISTRICT_COLORS.length];
+}
 
 function randomId(): string {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -902,6 +909,8 @@ function App() {
   const [busLines, setBusLines] = useState<BusLineCollection | null>(null);
   const [busLinesVisible, setBusLinesVisible] = useState(false);
   const [busLegendOpen, setBusLegendOpen] = useState(false);
+  const [bezirkBorderVisible, setBezirkBorderVisible] = useState(false);
+  const [stadtbezirkBorderVisible, setStadtbezirkBorderVisible] = useState(false);
 
   const { position: currentPos, accuracy, error: geolocationError } = useCurrentLocation();
 
@@ -1628,6 +1637,24 @@ function App() {
                   <label className="poi-menu-item">
                     <input
                       type="checkbox"
+                      checked={bezirkBorderVisible}
+                      onChange={() => setBezirkBorderVisible((v) => !v)}
+                    />
+                    <span className="poi-color-dot" style={{ background: "#795548" }} />
+                    Bezirksgrenzen
+                  </label>
+                  <label className="poi-menu-item">
+                    <input
+                      type="checkbox"
+                      checked={stadtbezirkBorderVisible}
+                      onChange={() => setStadtbezirkBorderVisible((v) => !v)}
+                    />
+                    <span className="poi-color-dot" style={{ background: "#607d8b" }} />
+                    Stadtbezirksgrenzen
+                  </label>
+                  <label className="poi-menu-item">
+                    <input
+                      type="checkbox"
                       checked={busLinesVisible}
                       onChange={() => setBusLinesVisible((v) => !v)}
                     />
@@ -1680,6 +1707,7 @@ function App() {
 
               <RecenterOnPosition position={currentPos} />
               <CenterButton position={currentPos} />
+              <ScaleControl position="bottomleft" imperial={false} />
 
               {role === "seeker" && (
                 <ExclusionOverlay
@@ -1708,8 +1736,6 @@ function App() {
                       >
                         <Popup>
                           <b>{selectedStop.name}</b>
-                          <br />
-                          {selectedStop.count} Steig(e)
                         </Popup>
                       </CircleMarker>
                     </>
@@ -1735,8 +1761,6 @@ function App() {
                     >
                       <Popup>
                         <b>{stop.name}</b>
-                        <br />
-                        {stop.count} Steig(e)
                         {role === "hider" && (
                           <>
                             <br />
@@ -1754,6 +1778,44 @@ function App() {
                   );
                 });
               })()}
+
+              {bezirkBorderVisible && geojson && geojson.features.flatMap((feature, fi) => {
+                const bezirk = bezirkForFeature(feature);
+                if (!bezirk) return [];
+                const color = districtColor(bezirk);
+                const toLL = (ring: number[][]): [number, number][] => ring.map(([lon, lat]) => [lat, lon]);
+                if (feature.geometry.type === "Polygon") {
+                  return [(
+                    <Polygon key={`bz-${fi}`} positions={(feature.geometry.coordinates as number[][][]).map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
+                      <Tooltip sticky>{bezirk}</Tooltip>
+                    </Polygon>
+                  )];
+                }
+                return (feature.geometry.coordinates as number[][][][]).map((poly, pi) => (
+                  <Polygon key={`bz-${fi}-${pi}`} positions={poly.map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
+                    <Tooltip sticky>{bezirk}</Tooltip>
+                  </Polygon>
+                ));
+              })}
+
+              {stadtbezirkBorderVisible && geojson && geojson.features.flatMap((feature, fi) => {
+                const sb = (feature.properties.STADTBEZIR ?? "").trim();
+                if (!sb) return [];
+                const color = districtColor(sb);
+                const toLL = (ring: number[][]): [number, number][] => ring.map(([lon, lat]) => [lat, lon]);
+                if (feature.geometry.type === "Polygon") {
+                  return [(
+                    <Polygon key={`sb-${fi}`} positions={(feature.geometry.coordinates as number[][][]).map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
+                      <Tooltip sticky>{sb}</Tooltip>
+                    </Polygon>
+                  )];
+                }
+                return (feature.geometry.coordinates as number[][][][]).map((poly, pi) => (
+                  <Polygon key={`sb-${fi}-${pi}`} positions={poly.map(toLL)} pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}>
+                    <Tooltip sticky>{sb}</Tooltip>
+                  </Polygon>
+                ));
+              })}
 
               {busLinesVisible && busLines && busLines.features.map((feature) => {
                 const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]);
