@@ -6,9 +6,9 @@ import { STOPS } from "./data/stops";
 
 type Role = "landing" | "hider" | "seeker";
 type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT" | "MATCH_POI" | "MATCH_BUSLINE" | "MATCH_STREET" | "MEASURE";
-type MeasureType = "kitas" | "schulen" | "sportstaetten" | "friedhoefe" | "kinos" | "krankenhaeuser" | "museen" | "buechereien" | "baeder" | "busline" | "street" | "border_bezirk" | "border_stadtbezirk";
+type MeasureType = "kitas" | "schulen" | "sportstaetten" | "friedhoefe" | "kinos" | "krankenhaeuser" | "museen" | "buechereien" | "baeder" | "border_bezirk" | "border_stadtbezirk";
 type MatchLevel = "bezirk" | "stadtbezirk";
-type RadarPreset = "0.25" | "0.5" | "1" | "2" | "custom";
+type RadarPreset = "0.1" | "0.25" | "0.5" | "1" | "2" | "custom";
 
 type QuestionCode = {
   qid: string;
@@ -76,12 +76,12 @@ type BusLineCollection = {
 };
 
 const POI_LAYERS: PoiLayerConfig[] = [
-  { id: "kitas", label: "Kita", file: "kitas_ms.geojson", color: "#e91e63", nameKey: "E_NAME" },
+  { id: "kitas", label: "Kita", file: "kitas_ms.geojson", color: "#fdd835", nameKey: "E_NAME" },
   { id: "schulen", label: "Schule", file: "schulen_ms.geojson", color: "#9c27b0", nameKey: "NAME" },
   { id: "sportstaetten", label: "Sportstätte", file: "sportstaetten.geojson", color: "#4caf50", nameKey: "Name" },
   { id: "friedhoefe", label: "Friedhof", file: "friedhoefe.geojson", color: "#607d8b", nameKey: "NAME" },
   { id: "kinos", label: "Kino", file: "kinos.geojson", color: "#ff9800", nameKey: "NAME" },
-  { id: "krankenhaeuser", label: "Krankenhaus", file: "krankenhaeuser.geojson", color: "#f44336", nameKey: "NAME" },
+  { id: "krankenhaeuser", label: "Krankenhaus", file: "krankenhaeuser.geojson", color: "#009688", nameKey: "NAME" },
   { id: "museen", label: "Museum", file: "museen.geojson", color: "#3f51b5", nameKey: "NAME" },
   { id: "buechereien", label: "Bücherei", file: "buechereien.geojson", color: "#00bcd4", nameKey: "NAME" },
   { id: "baeder", label: "Bad", file: "baeder.geojson", color: "#2196f3", nameKey: "NAME" },
@@ -91,8 +91,6 @@ const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
   { id: "border_bezirk", label: "Bezirksgrenze" },
   { id: "border_stadtbezirk", label: "Stadtbezirksgrenze" },
   ...POI_LAYERS.map((l) => ({ id: l.id as MeasureType, label: l.label })),
-  { id: "street", label: "Straße" },
-  { id: "busline", label: "Buslinie" },
 ];
 
 const GROUP_MAP: Record<string, string> = {
@@ -659,13 +657,7 @@ function isPointExcludedByAnswer(
     const result = answerCode.answer.result as "CLOSER" | "FURTHER";
     let posDist: number | null = null;
 
-    if (mt === "busline") {
-      if (!busLines) return false;
-      const nearest = findNearestBusLines(pos, busLines);
-      posDist = nearest.length > 0 ? nearest[0].dist : null;
-    } else if (mt === "street") {
-      return false;
-    } else if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
+    if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
       const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
       posDist = distToNearestBorder(pos, geojson, level);
       if (!Number.isFinite(posDist)) return false;
@@ -890,6 +882,7 @@ const FOTO_QUESTIONS: { id: string; label: string; description: string }[] = [
 type QCatEntry = { subKey: string; label: string; reward: string; time: string };
 const QUESTION_CATEGORIES: { group: string; reward: string; time: string; items: QCatEntry[] }[] = [
   { group: "Radar", reward: "2 Karten ziehen, 1 behalten", time: "3 min", items: [
+    { subKey: "RADAR_0.1", label: "100 m", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
     { subKey: "RADAR_0.25", label: "250 m", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
     { subKey: "RADAR_0.5", label: "500 m", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
     { subKey: "RADAR_1", label: "1 km", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
@@ -925,7 +918,7 @@ function doubleReward(reward: string): string {
   return reward.replace(/(\d+)/g, (_, n) => String(Number(n) * 2));
 }
 
-const RADAR_PRESETS = new Set(["0.25", "0.5", "1", "2"]);
+const RADAR_PRESETS = new Set(["0.1", "0.25", "0.5", "1", "2"]);
 
 function questionSubKey(type: QuestionType, payload: Record<string, unknown>): string {
   if (type === "RADAR") {
@@ -1321,17 +1314,7 @@ function App() {
       const mt = opts?.measureType ?? selectedMeasureType;
       let distKm: number | null = null;
 
-      if (mt === "busline") {
-        if (!busLines) { setAnswerFeedback("Buslinien-Daten nicht geladen."); return; }
-        const nearest = findNearestBusLines(currentPos, busLines);
-        distKm = nearest.length > 0 ? nearest[0].dist : null;
-      } else if (mt === "street") {
-        setAnswerFeedback("Straßenabstand wird ermittelt...");
-        const street = await reverseGeocodeStreet(currentPos);
-        if (!street) { setAnswerFeedback("Straße konnte nicht ermittelt werden."); return; }
-        // For street we use 0 as "on this street" — distance is conceptually 0 at your position
-        distKm = 0;
-      } else if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
+      if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
         const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
         distKm = distToNearestBorder(currentPos, geojson, level);
         if (!Number.isFinite(distKm)) { setAnswerFeedback("Grenzabstand konnte nicht berechnet werden."); return; }
@@ -1388,8 +1371,8 @@ function App() {
 
   async function evaluateHiderCode(): Promise<void> {
     try {
-      if (!currentPos) {
-        setHiderFeedback("Standort wird benötigt – GPS freigeben.");
+      if (!selectedStop) {
+        setHiderFeedback("Bitte zuerst eine Bushaltestelle auswählen.");
         return;
       }
       const decoded = decodeCode(hiderInputCode.trim());
@@ -1398,7 +1381,7 @@ function App() {
         return;
       }
 
-      const realPos = currentPos;
+      const realPos: Position = { lat: selectedStop.lat, lon: selectedStop.lon };
       let answer: Record<string, unknown> = {};
       let feedback = "";
 
@@ -1480,13 +1463,7 @@ function App() {
         const seekerDist = Number(decoded.payload.distKm);
         let hiderDist: number | null = null;
 
-        if (mt === "busline") {
-          if (!busLines) { setHiderFeedback("Buslinien-Daten nicht geladen."); return; }
-          const nearest = findNearestBusLines(realPos, busLines);
-          hiderDist = nearest.length > 0 ? nearest[0].dist : null;
-        } else if (mt === "street") {
-          hiderDist = 0;
-        } else if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
+        if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
           const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
           hiderDist = distToNearestBorder(realPos, geojson, level);
           if (!Number.isFinite(hiderDist)) hiderDist = null;
@@ -1801,6 +1778,7 @@ function App() {
                   <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <label>Radius</label>
                   <div className="split-buttons">
+                    <button className={`btn ghost q-btn${qBtnCls("RADAR_0.1", usedSubKeys)} ${radarPreset === "0.1" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.1")}>100 m</button>
                     <button className={`btn ghost q-btn${qBtnCls("RADAR_0.25", usedSubKeys)} ${radarPreset === "0.25" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.25")}>250 m</button>
                     <button className={`btn ghost q-btn${qBtnCls("RADAR_0.5", usedSubKeys)} ${radarPreset === "0.5" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.5")}>500 m</button>
                     <button className={`btn ghost q-btn${qBtnCls("RADAR_1", usedSubKeys)} ${radarPreset === "1" ? "active-btn" : ""}`} onClick={() => setRadarPreset("1")}>1 km</button>

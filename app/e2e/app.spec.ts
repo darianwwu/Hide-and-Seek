@@ -40,6 +40,16 @@ async function hiderEvaluate(page: Page, code: string): Promise<string> {
   return answerArea.inputValue();
 }
 
+async function selectHideout(page: Page, stopId: string) {
+  // lsGet uses JSON.parse, so store JSON-stringified values for reload persistence
+  await page.evaluate((id) => {
+    localStorage.setItem("hs_hideout", JSON.stringify(id));
+    localStorage.setItem("hs_role", JSON.stringify("hider"));
+  }, stopId);
+  await page.reload();
+  await expect(page.getByPlaceholder(PH)).toBeVisible({ timeout: 10_000 });
+}
+
 // ── Landing Page ──────────────────────────────────────────────
 
 test.describe("Landing Page", () => {
@@ -264,7 +274,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     expect(answerCode).toMatch(/^A_RADAR_AB12_(JA|NEIN)$/);
   });
@@ -273,16 +283,16 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     expect(answerCode).toBe("A_RADAR_AB12_JA");
   });
 
   test("evaluating RADAR code far away produces NEIN", async ({ page }) => {
-    await mockGeo(page, 52.5, 8.0);
+    await mockGeo(page);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "waldfriedhof lauheide");
     const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     expect(answerCode).toBe("A_RADAR_AB12_NEIN");
   });
@@ -291,7 +301,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "THERMO_CD34_52.00000;7.70000_51.96300;7.62900");
     expect(answerCode).toBe("A_THERMO_CD34_WARMER");
   });
@@ -300,7 +310,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "THERMO_EF56_51.96300;7.62900_52.00000;7.70000");
     expect(answerCode).toBe("A_THERMO_EF56_COLDER");
   });
@@ -309,7 +319,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "MATCH_GH78_B_51.96250;7.62830");
     expect(answerCode).toBe("A_MATCH_GH78_JA");
   });
@@ -318,7 +328,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "MATCH_IJ90_S_51.96250;7.62830");
     expect(answerCode).toBe("A_MATCH_IJ90_JA");
   });
@@ -327,7 +337,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "MPOI_KL12_schulen_51.96250;7.62830_TestSchule");
     expect(answerCode).toMatch(/^A_MPOI_KL12_(JA|NEIN)$/);
   });
@@ -336,7 +346,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "MEAS_MN34_kitas_0,5_51.96250;7.62830");
     expect(answerCode).toMatch(/^A_MEAS_MN34_(CLOSER|FURTHER)$/);
   });
@@ -345,7 +355,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "MEAS_OP56_border_bezirk_1,0_51.96250;7.62830");
     expect(answerCode).toMatch(/^A_MEAS_OP56_(CLOSER|FURTHER)$/);
   });
@@ -354,7 +364,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, "MEAS_QR78_border_stadtbezirk_2,0_51.96250;7.62830");
     expect(answerCode).toMatch(/^A_MEAS_QR78_(CLOSER|FURTHER)$/);
   });
@@ -420,7 +430,7 @@ test.describe("Hider Question Overview", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     await page.locator("button.poi-menu-toggle", { hasText: /Fragen/ }).click();
     const radarBtn = page.locator(".hider-overview .q-btn").filter({ hasText: "1 km" }).first();
@@ -431,7 +441,7 @@ test.describe("Hider Question Overview", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     await page.getByPlaceholder(PH).fill("RADAR_CD34_51.96250;7.62830;1km");
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
@@ -491,7 +501,6 @@ test.describe("Seeker Panel - UI Structure", () => {
     const card = page.locator("[data-cat='measuring']");
     await expect(card.getByRole("button", { name: "Bezirksgrenze", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Stadtbezirksgrenze", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "Buslinie", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Kita", exact: true })).toBeVisible();
   });
 
@@ -719,7 +728,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const qid = questionCode.match(/^RADAR_([A-Z0-9]{4})_/)![1];
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_RADAR_/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -738,7 +747,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_MATCH_.*_(JA|NEIN)$/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -756,7 +765,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_MPOI_.*_(JA|NEIN)$/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -774,7 +783,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
-    await waitForGps(page);
+    await selectHideout(page, "prinzipalmarkt");
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_MEAS_.*_(CLOSER|FURTHER)$/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
