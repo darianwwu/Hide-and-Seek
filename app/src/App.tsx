@@ -867,7 +867,7 @@ function renderType(type: QuestionType): string {
   return "Matching Frage";
 }
 
-type QuestionPreview = { text: string; reward: string; time: string; doubled: boolean };
+type QuestionPreview = { text: string; reward: string; time: string; doubled: boolean; note?: string };
 
 const FOTO_QUESTIONS: { id: string; label: string; description: string }[] = [
   { id: "gebaeude", label: "Gebäude", description: "Irgendein Gebäude was du aus deiner aktuellen Position aus sehen kannst. Es müssen beide Seiten und das Dach zu sehen sein und das Dach muss im oberen Drittel des Bildes liegen." },
@@ -947,6 +947,16 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
   if (decoded.type === "RADAR") {
     const radiusKm = Number(decoded.payload.radiusKm);
     const meters = Math.round(radiusKm * 1000);
+    if (radiusKm <= 0.5) {
+      // 100 m / 250 m / 500 m: hider's exact GPS position is evaluated, not the bus stop
+      return {
+        text: `Bist du im Umkreis von ${meters} Metern von uns?`,
+        note: "⚠️ Verstecker: dein exakter GPS-Standort wird geprüft – nicht die gewählte Haltestelle.",
+        reward,
+        time,
+        doubled: false,
+      };
+    }
     return { text: `Bist du im Umkreis von ${meters} Metern von uns?`, reward, time, doubled: false };
   }
   if (decoded.type === "THERMO_PATH") {
@@ -1388,9 +1398,17 @@ function App() {
       if (decoded.type === "RADAR") {
         const center = decoded.payload.center as [number, number];
         const radiusKm = Number(decoded.payload.radiusKm);
-        const inside = haversineKm(realPos, { lat: center[0], lon: center[1] }) <= radiusKm;
+        // 100 m / 250 m / 500 m: use the hider's exact GPS position, not the bus stop
+        const useExactPos = radiusKm <= 0.5;
+        if (useExactPos && !currentPos) {
+          setHiderFeedback("Für kurze Radien (≤500 m) wird dein exakter GPS-Standort benötigt. GPS nicht verfügbar.");
+          return;
+        }
+        const posForRadar = useExactPos ? currentPos! : realPos;
+        const inside = haversineKm(posForRadar, { lat: center[0], lon: center[1] }) <= radiusKm;
         answer = { inside };
-        feedback = inside ? "Radar: JA, im Umkreis." : "Radar: NEIN, außerhalb.";
+        const posLabel = useExactPos ? "exakter GPS-Standort" : "Haltestelle";
+        feedback = inside ? `Radar: JA, im Umkreis. (${posLabel})` : `Radar: NEIN, außerhalb. (${posLabel})`;
       }
 
       if (decoded.type === "THERMO_PATH") {
@@ -1635,6 +1653,9 @@ function App() {
                   <div className="question-preview-overlay" onClick={() => setQuestionPreview(null)}>
                     <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
                       <p className="question-preview-text">{questionPreview.text}</p>
+                      {questionPreview.note && (
+                        <p className="meta small" style={{ color: "#b45309", margin: "4px 0 0" }}>{questionPreview.note}</p>
+                      )}
                       <div className="question-preview-meta">
                         <span>🎴 {questionPreview.doubled ? <><s>{questionPreview.reward}</s> <strong style={{color:"#16a34a"}}>{doubleReward(questionPreview.reward)}</strong> (2×)</> : questionPreview.reward}</span>
                         <span>⏱️ {questionPreview.time}</span>
@@ -1793,6 +1814,11 @@ function App() {
                       onChange={(e) => setRadarCustomKmInput(e.target.value)}
                       placeholder="z. B. 0,2"
                     />
+                  )}
+                  {(radarPreset === "0.1" || radarPreset === "0.25" || radarPreset === "0.5") && (
+                    <p className="meta small" style={{ color: "#b45309", marginTop: 4 }}>
+                      ⚠️ 100 m / 250 m / 500 m: Verstecker wertet seinen <strong>exakten GPS-Standort</strong> aus – nicht die gewählte Haltestelle.
+                    </p>
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
                   <button className="q-btn" onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>

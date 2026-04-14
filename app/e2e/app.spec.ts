@@ -376,6 +376,37 @@ test.describe("Hider Panel", () => {
     await page.getByPlaceholder(PH).fill("TOTALLY_INVALID");
     await expect(page.locator(".question-preview-overlay")).not.toBeVisible();
   });
+
+  test("small RADAR (0.1km) preview shows GPS note", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await page.getByPlaceholder(PH).fill("RADAR_AB12_51.96250;7.62830;0,1km");
+    await expect(page.locator(".question-preview-overlay")).toBeVisible();
+    await expect(page.locator(".question-preview-box")).toContainText("exakter GPS-Standort");
+  });
+
+  test("evaluating small RADAR (0.1km) uses GPS – JA when GPS at center, stop far away", async ({ page }) => {
+    // GPS near radar center; far-away bus stop must NOT be used
+    await mockGeo(page, 51.9625, 7.6283);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await selectHideout(page, "waldfriedhof lauheide");
+    await waitForGps(page);
+    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km");
+    expect(answerCode).toBe("A_RADAR_AB12_JA");
+  });
+
+  test("evaluating small RADAR (0.1km) uses GPS – NEIN when GPS far away, stop near center", async ({ page }) => {
+    // GPS far from radar center; near bus stop must NOT be used
+    await mockGeo(page, 52.0, 8.0);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await selectHideout(page, "prinzipalmarkt");
+    await waitForGps(page);
+    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km");
+    expect(answerCode).toBe("A_RADAR_AB12_NEIN");
+  });
 });
 
 // ── Hider Question Overview ───────────────────────────────────
@@ -472,6 +503,21 @@ test.describe("Seeker Panel - UI Structure", () => {
     await expect(card.getByText("Aktiv: 0,25 km")).toBeVisible();
     await card.getByRole("button", { name: "2 km" }).click();
     await expect(card.getByText("Aktiv: 2 km")).toBeVisible();
+  });
+
+  test("small radar presets show GPS note, large presets hide it", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    const card = page.locator("[data-cat='radar']");
+    for (const label of ["100 m", "250 m", "500 m"]) {
+      await card.getByRole("button", { name: label }).click();
+      await expect(card.getByText(/exakten GPS-Standort/)).toBeVisible();
+    }
+    for (const label of ["1 km", "2 km"]) {
+      await card.getByRole("button", { name: label }).click();
+      await expect(card.getByText(/exakten GPS-Standort/)).not.toBeVisible();
+    }
   });
 
   test("custom radar input appears when Custom selected", async ({ page }) => {
