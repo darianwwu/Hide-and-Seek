@@ -1,13 +1,37 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, CircleMarker, MapContainer, Pane, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap } from "react-leaflet";
-import L from "leaflet";
-import { STOPS } from "./data/stops";
+import { getActiveCity, CITIES, CITY_STORAGE_KEY } from "./data/cities";
+import type {
+  Position,
+  PoiFeature,
+  PoiCollection,
+  BusLineCollection,
+  StadtteilFeature,
+  StadtteileCollection,
+} from "./data/cities";
+
+const CITY = getActiveCity();
+const STOPS = CITY.stops;
+const BORDER_COLORS = ["#795548", "#607d8b", "#5d4037", "#455a64"];
+
+function switchCity(id: string): void {
+  if (id === CITY.id) return;
+  try {
+    ["hs_hideout", "hs_hiderUsed", "hs_usedFoto", "hs_askedCodes", "hs_latestCode", "hs_appliedAnswers"].forEach((k) =>
+      localStorage.removeItem(k),
+    );
+    localStorage.setItem(CITY_STORAGE_KEY, JSON.stringify(id));
+  } catch {
+    /* ignore */
+  }
+  window.location.reload();
+}
 
 type Role = "landing" | "hider" | "seeker";
 type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT" | "MATCH_POI" | "MATCH_BUSLINE" | "MATCH_STREET" | "MEASURE";
-type MeasureType = "kitas" | "schulen" | "sportstaetten" | "friedhoefe" | "kinos" | "krankenhaeuser" | "museen" | "buechereien" | "baeder" | "border_bezirk" | "border_stadtbezirk";
-type MatchLevel = "bezirk" | "stadtbezirk";
+type MeasureType = string;
+type MatchLevel = string;
 type RadarPreset = "0.1" | "0.25" | "0.5" | "1" | "2" | "custom";
 
 type QuestionCode = {
@@ -22,138 +46,10 @@ type AnswerCode = {
   answer: Record<string, unknown>;
 };
 
-type Position = { lat: number; lon: number };
-
-type StadtteilFeature = {
-  type: "Feature";
-  properties: {
-    NR_STATIST?: string;
-    NAME_STATI?: string;
-    STADTBEZIR?: string;
-  };
-  geometry: {
-    type: "Polygon" | "MultiPolygon";
-    coordinates: number[][][] | number[][][][];
-  };
-};
-
-type StadtteileCollection = {
-  type: "FeatureCollection";
-  features: StadtteilFeature[];
-};
-
-const MUNSTER_CENTER: Position = { lat: 51.9607, lon: 7.6261 };
-const HIDE_RADIUS_M = 400;
-
-type PoiFeature = {
-  type: "Feature";
-  properties: Record<string, unknown>;
-  geometry: { type: "Point"; coordinates: [number, number] };
-};
-
-type PoiCollection = {
-  type: "FeatureCollection";
-  features: PoiFeature[];
-};
-
-type PoiLayerConfig = {
-  id: string;
-  label: string;
-  file: string;
-  color: string;
-  nameKey: string;
-};
-
-type BusLineFeature = {
-  type: "Feature";
-  properties: { route_id: string; name: string; color: string; label_lat: number; label_lon: number };
-  geometry: { type: "LineString"; coordinates: [number, number][] };
-};
-
-type BusLineCollection = {
-  type: "FeatureCollection";
-  features: BusLineFeature[];
-};
-
-const POI_LAYERS: PoiLayerConfig[] = [
-  { id: "kitas", label: "Kita", file: "kitas_ms.geojson", color: "#fdd835", nameKey: "E_NAME" },
-  { id: "schulen", label: "Schule", file: "schulen_ms.geojson", color: "#9c27b0", nameKey: "NAME" },
-  { id: "sportstaetten", label: "Sportstätte", file: "sportstaetten.geojson", color: "#4caf50", nameKey: "Name" },
-  { id: "friedhoefe", label: "Friedhof", file: "friedhoefe.geojson", color: "#607d8b", nameKey: "NAME" },
-  { id: "kinos", label: "Kino", file: "kinos.geojson", color: "#ff9800", nameKey: "NAME" },
-  { id: "krankenhaeuser", label: "Krankenhaus", file: "krankenhaeuser.geojson", color: "#009688", nameKey: "NAME" },
-  { id: "museen", label: "Museum", file: "museen.geojson", color: "#3f51b5", nameKey: "NAME" },
-  { id: "buechereien", label: "Bücherei", file: "buechereien.geojson", color: "#00bcd4", nameKey: "NAME" },
-  { id: "baeder", label: "Bad", file: "baeder.geojson", color: "#2196f3", nameKey: "NAME" },
-];
-
 const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
-  { id: "border_bezirk", label: "Bezirksgrenze" },
-  { id: "border_stadtbezirk", label: "Stadtbezirksgrenze" },
-  ...POI_LAYERS.map((l) => ({ id: l.id as MeasureType, label: l.label })),
+  ...CITY.districtLevels.map((l) => ({ id: `border_${l.id}`, label: l.borderLabel })),
+  ...CITY.poiLayers.map((l) => ({ id: l.id, label: l.label })),
 ];
-
-const GROUP_MAP: Record<string, string> = {
-  "11": "Mitte",
-  "12": "Mitte",
-  "13": "Mitte",
-  "14": "Mitte",
-  "15": "Mitte",
-  "21": "Mitte",
-  "22": "Mitte",
-  "23": "Mitte",
-  "24": "Mitte",
-  "25": "Mitte",
-  "26": "Mitte",
-  "27": "Mitte",
-  "28": "Mitte",
-  "29": "Mitte",
-  "31": "Mitte Süd",
-  "32": "Mitte Süd",
-  "33": "Mitte Süd",
-  "43": "Mitte Süd",
-  "46": "Mitte Nord",
-  "47": "Mitte Nord",
-  "44": "Mauritz",
-  "45": "Mauritz",
-  "71": "Mauritz",
-  "34": "Berg Fidel",
-  "91": "Berg Fidel",
-  "62": "Kinderhaus-Ost",
-  "63": "Kinderhaus-West",
-  "95": "Hiltrup",
-  "96": "Hiltrup",
-  "97": "Hiltrup",
-  "81": "Gremmendorf",
-  "82": "Gremmendorf",
-  "51": "Gievenbeck",
-  "52": "Sentrup",
-  "54": "Mecklenbeck",
-  "56": "Albachten",
-  "57": "Roxel",
-  "58": "Nienberge",
-  "61": "Coerde",
-  "68": "Sprakel",
-  "76": "Gelmer",
-  "77": "Handorf",
-  "86": "Angelmodde",
-  "87": "Wolbeck",
-  "98": "Amelsbüren",
-};
-
-const EXCLUDED_DISTRICTS = new Set(["Sprakel", "Nienberge", "Roxel", "Albachten", "Amelsbüren", "Wolbeck"]);
-
-const STADTBEZIRK_MAP: Record<string, string> = {
-  "1 Altstadt": "Mitte",
-  "2 Innenstadtring": "Mitte",
-  "3 Mitte-S\u00fcd": "Mitte",
-  "4 Mitte-Nordost": "Mitte",
-  "5 M\u00fcnster-West": "West",
-  "6 M\u00fcnster-Nord": "Nord",
-  "7 M\u00fcnster-Ost": "Ost",
-  "8 M\u00fcnster-S\u00fcdost": "S\u00fcdost",
-  "9 M\u00fcnster-Hiltrup": "Hiltrup",
-};
 
 const DISTRICT_COLORS = ["#e53935","#7b1fa2","#1565c0","#00695c","#e65100","#283593","#006064","#2e7d32","#f57f17","#4e342e","#0277bd","#558b2f"];
 function districtColor(name: string): string {
@@ -266,9 +162,10 @@ function encodeQuestionCode(payload: QuestionCode): string {
     return `THERMO_${payload.qid}_${formatCoord(start[0])};${formatCoord(start[1])}_${formatCoord(end[0])};${formatCoord(end[1])}_${formatKmLocale(targetKm)}km`;
   }
   if (payload.type === "MATCH_DISTRICT") {
-    const level = payload.payload.level as MatchLevel;
+    const level = payload.payload.level as string;
     const ref = payload.payload.reference as [number, number];
-    return `MATCH_${payload.qid}_${level === "bezirk" ? "B" : "S"}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
+    const code = CITY.districtLevels.find((l) => l.id === level)?.code ?? "B";
+    return `MATCH_${payload.qid}_${code}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
   }
   if (payload.type === "MATCH_POI") {
     const poiType = payload.payload.poiType as string;
@@ -333,12 +230,14 @@ function decodeCode(raw: string): QuestionCode | AnswerCode {
     };
   }
 
-  const matchQ = raw.match(/^MATCH_([A-Z0-9]{4})_(B|S)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  const matchQ = raw.match(/^MATCH_([A-Z0-9]{4})_([A-Z])_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
   if (matchQ) {
+    const letter = matchQ[2].toUpperCase();
+    const level = CITY.districtLevels.find((l) => l.code === letter)?.id ?? CITY.districtLevels[0]?.id ?? "bezirk";
     return {
       qid: matchQ[1].toUpperCase(),
       type: "MATCH_DISTRICT",
-      payload: { level: matchQ[2].toUpperCase() === "B" ? "bezirk" : "stadtbezirk", reference: parseCoordPair(matchQ[3]) },
+      payload: { level, reference: parseCoordPair(matchQ[3]) },
     };
   }
 
@@ -514,27 +413,17 @@ function pointInGeometry(point: Position, geometry: StadtteilFeature["geometry"]
   });
 }
 
-function bezirkForFeature(feature: StadtteilFeature): string | null {
-  const nr = feature.properties.NR_STATIST ?? "";
-  const mapped = GROUP_MAP[nr] ?? feature.properties.NAME_STATI ?? null;
-  if (!mapped) return null;
-  if (EXCLUDED_DISTRICTS.has(mapped)) return null;
-  return mapped;
-}
-
 function findDistrictLabel(
   point: Position,
   geojson: StadtteileCollection | null,
   level: MatchLevel,
 ): string | null {
   if (!geojson) return null;
+  const levelConfig = CITY.districtLevels.find((l) => l.id === level);
+  if (!levelConfig) return null;
   const feature = geojson.features.find((item) => pointInGeometry(point, item.geometry));
   if (!feature) return null;
-  if (level === "stadtbezirk") {
-    const raw = (feature.properties.STADTBEZIR ?? "").trim();
-    return STADTBEZIRK_MAP[raw] ?? null;
-  }
-  return bezirkForFeature(feature);
+  return levelConfig.resolve(feature.properties);
 }
 
 function distPointToRing(pos: Position, ring: number[][]): number {
@@ -548,43 +437,16 @@ function distPointToRing(pos: Position, ring: number[][]): number {
   return minDist;
 }
 
-function distToNearestBorder(
-  pos: Position,
-  geojson: StadtteileCollection | null,
-  level: "bezirk" | "stadtbezirk",
-): number {
+// Distance to the nearest district boundary line (any level — every level's
+// polygons share the same Stadtteil/Ortsteil ring edges in this data).
+function distToNearestBorder(pos: Position, geojson: StadtteileCollection | null): number {
   if (!geojson) return Infinity;
-
-  if (level === "stadtbezirk") {
-    let minDist = Infinity;
-    for (const feature of geojson.features) {
-      const geom = feature.geometry;
-      const rings: number[][][] = geom.type === "Polygon"
-        ? (geom.coordinates as number[][][])
-        : (geom.coordinates as number[][][][]).flat();
-      for (const ring of rings) {
-        const d = distPointToRing(pos, ring);
-        if (d < minDist) minDist = d;
-      }
-    }
-    return minDist;
-  }
-
-  // bezirk: group features by bezirk name, merge rings per group, find min dist across all group boundaries
-  const groups: Record<string, number[][][]> = {};
+  let minDist = Infinity;
   for (const feature of geojson.features) {
-    const name = bezirkForFeature(feature);
-    if (!name) continue;
-    if (!groups[name]) groups[name] = [];
     const geom = feature.geometry;
     const rings: number[][][] = geom.type === "Polygon"
       ? (geom.coordinates as number[][][])
       : (geom.coordinates as number[][][][]).flat();
-    groups[name].push(...rings);
-  }
-
-  let minDist = Infinity;
-  for (const rings of Object.values(groups)) {
     for (const ring of rings) {
       const d = distPointToRing(pos, ring);
       if (d < minDist) minDist = d;
@@ -657,9 +519,8 @@ function isPointExcludedByAnswer(
     const result = answerCode.answer.result as "CLOSER" | "FURTHER";
     let posDist: number | null = null;
 
-    if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
-      const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
-      posDist = distToNearestBorder(pos, geojson, level);
+    if (mt.startsWith("border_")) {
+      posDist = distToNearestBorder(pos, geojson);
       if (!Number.isFinite(posDist)) return false;
     } else {
       const layerData = poiData[mt];
@@ -763,79 +624,6 @@ function CenterButton({ position }: { position: Position | null }) {
   );
 }
 
-function ExclusionOverlay({
-  answers,
-  questions,
-  geojson,
-  poiData,
-  busLines,
-}: {
-  answers: AnswerCode[];
-  questions: Record<string, QuestionCode>;
-  geojson: StadtteileCollection | null;
-  poiData: Record<string, PoiCollection>;
-  busLines: BusLineCollection | null;
-}) {
-  const map = useMap();
-  const layerRef = useRef<L.GridLayer | null>(null);
-
-  useEffect(() => {
-    if (layerRef.current) {
-      map.removeLayer(layerRef.current);
-      layerRef.current = null;
-    }
-
-    if (answers.length === 0) return;
-
-    const hasMeasure = answers.some((a) => {
-      const q = questions[a.qid];
-      return q?.type === "MEASURE";
-    });
-    const step = hasMeasure ? 8 : 4;
-
-    const ExclusionGrid = L.GridLayer.extend({
-      createTile(coords: L.Coords) {
-        const tile = document.createElement("canvas");
-        const size = this.getTileSize();
-        tile.width = size.x;
-        tile.height = size.y;
-
-        const ctx = tile.getContext("2d");
-        if (!ctx) return tile;
-
-        ctx.fillStyle = "rgba(50, 50, 50, 0.45)";
-
-        for (let x = 0; x < size.x; x += step) {
-          for (let y = 0; y < size.y; y += step) {
-            const point = L.point(coords.x * size.x + x, coords.y * size.y + y);
-            const latlng = map.unproject(point, coords.z);
-            const pos: Position = { lat: latlng.lat, lon: latlng.lng };
-
-            if (isPointExcluded(pos, answers, questions, geojson, poiData, busLines)) {
-              ctx.fillRect(x, y, step, step);
-            }
-          }
-        }
-
-        return tile;
-      },
-    });
-
-    const layer = new ExclusionGrid() as L.GridLayer;
-    layer.addTo(map);
-    layerRef.current = layer;
-
-    return () => {
-      if (layerRef.current) {
-        map.removeLayer(layerRef.current);
-        layerRef.current = null;
-      }
-    };
-  }, [answers, questions, geojson, poiData, busLines, map]);
-
-  return null;
-}
-
 function copyText(value: string): void {
   navigator.clipboard.writeText(value).catch(() => {
     // ignore on unsupported clipboard
@@ -894,9 +682,8 @@ const QUESTION_CATEGORIES: { group: string; reward: string; time: string; items:
     { subKey: "THERMO_PATH_1.5", label: "1,5 km", reward: "2 Karten ziehen, 1 behalten", time: "3 min" },
   ]},
   { group: "Matching", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
-    { subKey: "MATCH_DISTRICT_bezirk", label: "Bezirk", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
-    { subKey: "MATCH_DISTRICT_stadtbezirk", label: "Stadtbezirk", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
-    ...POI_LAYERS.map((l) => ({ subKey: `MATCH_POI_${l.id}`, label: l.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
+    ...CITY.districtLevels.map((l) => ({ subKey: `MATCH_DISTRICT_${l.id}`, label: l.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
+    ...CITY.poiLayers.map((l) => ({ subKey: `MATCH_POI_${l.id}`, label: l.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
     { subKey: "MATCH_STREET", label: "Straße", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
   ]},
   { group: "Measuring", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
@@ -968,13 +755,13 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
   }
   if (decoded.type === "MATCH_DISTRICT") {
     const level = decoded.payload.level as string;
-    const label = level === "bezirk" ? "Bezirk" : "Stadtbezirk";
+    const label = CITY.districtLevels.find((l) => l.id === level)?.label ?? level;
     return { text: `Bist du im gleichen ${label} wie wir?`, reward, time, doubled: false };
   }
   if (decoded.type === "MATCH_POI") {
     const poiType = decoded.payload.poiType as string;
     const name = decoded.payload.nearestName as string;
-    const label = POI_LAYERS.find((l) => l.id === poiType)?.label ?? poiType;
+    const label = CITY.poiLayers.find((l) => l.id === poiType)?.label ?? poiType;
     return { text: `Ist unser/e nächste/r ${label} \u201e${name}\u201c auch dein/e nächste/r ${label}?`, reward, time, doubled: false };
   }
   if (decoded.type === "MATCH_BUSLINE") {
@@ -1040,10 +827,10 @@ function App() {
     walkedKm: number;
     lastPos: Position | null;
   }>({ active: false, targetKm: 0.75, walkedKm: 0, lastPos: null });
-  const matchLevel: MatchLevel = "bezirk";
-  const selectedPoiType = POI_LAYERS[0].id;
+  const matchLevel: MatchLevel = CITY.districtLevels[0].id;
+  const selectedPoiType = CITY.poiLayers[0]?.id ?? "";
   const [selectedBusLine, setSelectedBusLine] = useState<string>("");
-  const selectedMeasureType: MeasureType = "kitas";
+  const selectedMeasureType: MeasureType = MEASURE_TYPES[0]?.id ?? "";
   const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, number>>(() => lsGet("hs_usedFoto", {}));
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
 
@@ -1073,18 +860,19 @@ function App() {
   );
 
   const [poiData, setPoiData] = useState<Record<string, PoiCollection>>({});
-  const [poiVisible, setPoiVisible] = useState<Record<string, boolean>>(() => Object.fromEntries(POI_LAYERS.map((l) => [l.id, false])));
+  const [poiVisible, setPoiVisible] = useState<Record<string, boolean>>(() => Object.fromEntries(CITY.poiLayers.map((l) => [l.id, false])));
   const [poiMenuOpen, setPoiMenuOpen] = useState(false);
   const [busLines, setBusLines] = useState<BusLineCollection | null>(null);
   const [busLinesVisible, setBusLinesVisible] = useState(false);
   const [busLegendOpen, setBusLegendOpen] = useState(false);
-  const [bezirkBorderVisible, setBezirkBorderVisible] = useState(false);
-  const [stadtbezirkBorderVisible, setStadtbezirkBorderVisible] = useState(false);
+  const [borderVisible, setBorderVisible] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(CITY.districtLevels.map((l) => [l.id, false])),
+  );
 
   const { position: currentPos, accuracy, error: geolocationError } = useCurrentLocation();
 
   useEffect(() => {
-    POI_LAYERS.forEach((layer) => {
+    CITY.poiLayers.forEach((layer) => {
       fetch(`${import.meta.env.BASE_URL}pois/${layer.file}`)
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1183,33 +971,22 @@ function App() {
     return answers;
   }, [appliedAnswers, askedCodes]);
 
-  const bezirkGroups = useMemo(() => {
-    if (!geojson) return new Map<string, [number, number][][]>();
-    const groups = new Map<string, StadtteilFeature[]>();
-    for (const feat of geojson.features) {
-      const name = bezirkForFeature(feat);
-      if (!name) continue;
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name)!.push(feat);
+  const districtGroupsByLevel = useMemo(() => {
+    const out = new Map<string, Map<string, [number, number][][]>>();
+    if (!geojson) return out;
+    for (const level of CITY.districtLevels) {
+      const groups = new Map<string, StadtteilFeature[]>();
+      for (const feat of geojson.features) {
+        const name = level.resolve(feat.properties);
+        if (!name) continue;
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name)!.push(feat);
+      }
+      const dissolved = new Map<string, [number, number][][]>();
+      for (const [name, feats] of groups) dissolved.set(name, dissolveFeatures(feats));
+      out.set(level.id, dissolved);
     }
-    const result = new Map<string, [number, number][][]>();
-    for (const [name, feats] of groups) result.set(name, dissolveFeatures(feats));
-    return result;
-  }, [geojson]);
-
-  const stadtbezirkGroups = useMemo(() => {
-    if (!geojson) return new Map<string, [number, number][][]>();
-    const groups = new Map<string, StadtteilFeature[]>();
-    for (const feat of geojson.features) {
-      const sb = (feat.properties.STADTBEZIR ?? "").trim();
-      const name = STADTBEZIRK_MAP[sb];
-      if (!name) continue;
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name)!.push(feat);
-    }
-    const result = new Map<string, [number, number][][]>();
-    for (const [name, feats] of groups) result.set(name, dissolveFeatures(feats));
-    return result;
+    return out;
   }, [geojson]);
 
   const filteredStops = useMemo(() => {
@@ -1217,7 +994,7 @@ function App() {
 
     // For each stop, sample 17 points (center + 8 on 400m ring + 8 on 200m ring).
     // If ALL sample points are excluded, the stop is filtered out.
-    const HIDE_RADIUS_KM = HIDE_RADIUS_M / 1000;
+    const HIDE_RADIUS_KM = CITY.hideRadiusM / 1000;
     const SAMPLE_ANGLES = 8;
 
     function samplePoints(center: Position, radiusKm: number): Position[] {
@@ -1324,9 +1101,8 @@ function App() {
       const mt = opts?.measureType ?? selectedMeasureType;
       let distKm: number | null = null;
 
-      if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
-        const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
-        distKm = distToNearestBorder(currentPos, geojson, level);
+      if (mt.startsWith("border_")) {
+        distKm = distToNearestBorder(currentPos, geojson);
         if (!Number.isFinite(distKm)) { setAnswerFeedback("Grenzabstand konnte nicht berechnet werden."); return; }
       } else {
         // POI type
@@ -1444,7 +1220,7 @@ function App() {
         const hiderNearest = findNearestPoi(realPos, layerData.features);
         const match = Boolean(hiderNearest && hiderNearest.name === seekerNearest);
         answer = { match };
-        const poiLabel = POI_LAYERS.find((l) => l.id === poiType)?.label ?? poiType;
+        const poiLabel = CITY.poiLayers.find((l) => l.id === poiType)?.label ?? poiType;
         feedback = match
           ? `POI-Matching (${poiLabel}): JA – gleicher nächster POI (${seekerNearest})`
           : `POI-Matching (${poiLabel}): NEIN – dein nächster: ${hiderNearest?.name ?? "?"}, Sucher: ${seekerNearest}`;
@@ -1481,9 +1257,8 @@ function App() {
         const seekerDist = Number(decoded.payload.distKm);
         let hiderDist: number | null = null;
 
-        if (mt === "border_bezirk" || mt === "border_stadtbezirk") {
-          const level = mt === "border_bezirk" ? "bezirk" : "stadtbezirk";
-          hiderDist = distToNearestBorder(realPos, geojson, level);
+        if (mt.startsWith("border_")) {
+          hiderDist = distToNearestBorder(realPos, geojson);
           if (!Number.isFinite(hiderDist)) hiderDist = null;
         } else {
           const layerData = poiData[mt];
@@ -1558,7 +1333,19 @@ function App() {
 
       {role === "landing" && (
         <main className="landing">
-          <h2>Rolle auswaehlen</h2>
+          <h2>Stadt auswaehlen</h2>
+          <div className="landing-actions">
+            {Object.values(CITIES).map((c) => (
+              <button
+                key={c.id}
+                className={`btn ${c.id === CITY.id ? "" : "ghost"}`}
+                onClick={() => switchCity(c.id)}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <h2 style={{ marginTop: 24 }}>Rolle auswaehlen</h2>
           <div className="landing-actions">
             <button className="btn" onClick={() => setRole("hider")}>
               Verstecker
@@ -1645,7 +1432,7 @@ function App() {
                           setQuestionPreview(null);
                         }
                       }}
-                      placeholder="RADAR_1A2B_51.96070;7.62610;2km"
+                      placeholder={CITY.placeholder}
                     />
                 </div>
 
@@ -1856,9 +1643,10 @@ function App() {
                   <h3>Matching</h3>
                   <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
                   <div className="q-grid">
-                    <button className={`q-btn${qBtnCls("MATCH_DISTRICT_bezirk", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "bezirk" })}>Bezirk</button>
-                    <button className={`q-btn${qBtnCls("MATCH_DISTRICT_stadtbezirk", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: "stadtbezirk" })}>Stadtbezirk</button>
-                    {POI_LAYERS.map((l) => (
+                    {CITY.districtLevels.map((lvl) => (
+                      <button key={lvl.id} className={`q-btn${qBtnCls(`MATCH_DISTRICT_${lvl.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: lvl.id })}>{lvl.label}</button>
+                    ))}
+                    {CITY.poiLayers.map((l) => (
                       <button key={l.id} className={`q-btn${qBtnCls(`MATCH_POI_${l.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MATCH_POI", { poiType: l.id })}>{l.label}</button>
                     ))}
                     <button className={`q-btn${qBtnCls("MATCH_STREET", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_STREET")}>Straße</button>
@@ -1960,24 +1748,17 @@ function App() {
               </button>
               {poiMenuOpen && (
                 <div className="poi-menu-list">
-                  <label className="poi-menu-item">
-                    <input
-                      type="checkbox"
-                      checked={bezirkBorderVisible}
-                      onChange={() => setBezirkBorderVisible((v) => !v)}
-                    />
-                    <span className="poi-color-dot" style={{ background: "#795548" }} />
-                    Bezirksgrenzen
-                  </label>
-                  <label className="poi-menu-item">
-                    <input
-                      type="checkbox"
-                      checked={stadtbezirkBorderVisible}
-                      onChange={() => setStadtbezirkBorderVisible((v) => !v)}
-                    />
-                    <span className="poi-color-dot" style={{ background: "#607d8b" }} />
-                    Stadtbezirksgrenzen
-                  </label>
+                  {CITY.districtLevels.map((lvl, idx) => (
+                    <label key={lvl.id} className="poi-menu-item">
+                      <input
+                        type="checkbox"
+                        checked={borderVisible[lvl.id] ?? false}
+                        onChange={() => setBorderVisible((prev) => ({ ...prev, [lvl.id]: !prev[lvl.id] }))}
+                      />
+                      <span className="poi-color-dot" style={{ background: BORDER_COLORS[idx % BORDER_COLORS.length] }} />
+                      {`${lvl.borderLabel}n`}
+                    </label>
+                  ))}
                   <label className="poi-menu-item">
                     <input
                       type="checkbox"
@@ -1988,7 +1769,7 @@ function App() {
                     Buslinien
                     {busLines && <span className="poi-count">({busLines.features.length})</span>}
                   </label>
-                  {POI_LAYERS.map((layer) => (
+                  {CITY.poiLayers.map((layer) => (
                     <label key={layer.id} className="poi-menu-item">
                       <input
                         type="checkbox"
@@ -2025,7 +1806,7 @@ function App() {
           </aside>
 
           <section className="map-wrap">
-            <MapContainer center={[MUNSTER_CENTER.lat, MUNSTER_CENTER.lon]} zoom={13} scrollWheelZoom className="map">
+            <MapContainer center={[CITY.center.lat, CITY.center.lon]} zoom={13} scrollWheelZoom className="map">
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -2035,16 +1816,6 @@ function App() {
               <CenterButton position={currentPos} />
               <ScaleControl position="bottomleft" imperial={false} />
 
-              {role === "seeker" && (
-                <ExclusionOverlay
-                  answers={activeAnswers}
-                  questions={askedCodes}
-                  geojson={geojson}
-                  poiData={poiData}
-                  busLines={busLines}
-                />
-              )}
-
               {(() => {
                 // Hider: show only selected stop with permanent radius
                 if (role === "hider" && selectedStop) {
@@ -2052,7 +1823,7 @@ function App() {
                     <>
                       <Circle
                         center={[selectedStop.lat, selectedStop.lon]}
-                        radius={HIDE_RADIUS_M}
+                        radius={CITY.hideRadiusM}
                         pathOptions={{ color: "#0f172a", weight: 1.5, fillColor: "#94a3b8", fillOpacity: 0.15 }}
                       />
                       <CircleMarker
@@ -2077,14 +1848,13 @@ function App() {
                       <Pane name="radiusPreview" style={{ zIndex: 350 }}>
                         <Circle
                           center={[previewStop.lat, previewStop.lon]}
-                          radius={HIDE_RADIUS_M}
+                          radius={CITY.hideRadiusM}
                           pathOptions={{ color: "#0f172a", weight: 1.5, fillColor: "#94a3b8", fillOpacity: 0.15 }}
                           interactive={false}
                         />
                       </Pane>
                     )}
                     {stopsToShow.map((stop) => {
-                      const seekerOut = role === "seeker" && !filteredStops.some((item) => item.id === stop.id);
                       return (
                         <CircleMarker
                           key={stop.id}
@@ -2093,8 +1863,8 @@ function App() {
                           pathOptions={{
                             color: "#7f1d1d",
                             weight: 1.4,
-                            fillColor: seekerOut ? "#cbd5e1" : "#dc2626",
-                            fillOpacity: seekerOut ? 0.25 : 0.9,
+                            fillColor: "#dc2626",
+                            fillOpacity: 0.9,
                           }}
                           eventHandlers={{
                             popupopen: () => setPreviewStopId(stop.id),
@@ -2123,31 +1893,22 @@ function App() {
                 );
               })()}
 
-              {bezirkBorderVisible && [...bezirkGroups.entries()].flatMap(([name, rings]) => {
-                const color = districtColor(name);
-                return rings.map((ring, ri) => (
-                  <Polygon
-                    key={`bz-${name}-${ri}`}
-                    positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
-                    pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
-                  >
-                    {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
-                  </Polygon>
-                ));
-              })}
-
-              {stadtbezirkBorderVisible && [...stadtbezirkGroups.entries()].flatMap(([name, rings]) => {
-                const color = districtColor(name);
-                return rings.map((ring, ri) => (
-                  <Polygon
-                    key={`sb-${name}-${ri}`}
-                    positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
-                    pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
-                  >
-                    {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
-                  </Polygon>
-                ));
-              })}
+              {CITY.districtLevels.map((lvl) =>
+                borderVisible[lvl.id]
+                  ? [...(districtGroupsByLevel.get(lvl.id)?.entries() ?? [])].flatMap(([name, rings]) => {
+                      const color = districtColor(name);
+                      return rings.map((ring, ri) => (
+                        <Polygon
+                          key={`${lvl.id}-${name}-${ri}`}
+                          positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
+                          pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
+                        >
+                          {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
+                        </Polygon>
+                      ));
+                    })
+                  : null,
+              )}
 
               {busLinesVisible && busLines && busLines.features.map((feature) => {
                 const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]);
@@ -2164,7 +1925,7 @@ function App() {
                 );
               })}
 
-              {POI_LAYERS.map((layer) =>
+              {CITY.poiLayers.map((layer) =>
                 poiVisible[layer.id] && poiData[layer.id]
                   ? poiData[layer.id].features.map((feature, idx) => {
                       const [lon, lat] = feature.geometry.coordinates;

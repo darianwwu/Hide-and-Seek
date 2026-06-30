@@ -292,7 +292,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page);
     await freshStart(page);
     await selectRole(page, "hider");
-    await selectHideout(page, "waldfriedhof lauheide");
+    await selectHideout(page, "im brook");
     const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
     expect(answerCode).toBe("A_RADAR_AB12_NEIN");
   });
@@ -391,7 +391,7 @@ test.describe("Hider Panel", () => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
-    await selectHideout(page, "waldfriedhof lauheide");
+    await selectHideout(page, "im brook");
     await waitForGps(page);
     const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km");
     expect(answerCode).toBe("A_RADAR_AB12_JA");
