@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Circle, CircleMarker, MapContainer, Pane, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap } from "react-leaflet";
+import type { ReactNode } from "react";
+import { Circle, CircleMarker, MapContainer, Pane, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import { getActiveCity, CITIES, CITY_STORAGE_KEY } from "./data/cities";
 import type {
   Position,
@@ -13,6 +14,7 @@ import type {
 
 const CITY = getActiveCity();
 const STOPS = CITY.stops;
+type StopLike = typeof STOPS[number];
 const BORDER_COLORS = ["#795548", "#607d8b", "#5d4037", "#455a64"];
 
 function switchCity(id: string): void {
@@ -53,6 +55,9 @@ const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
 
 type LonLat = [number, number];
 type DistrictShape = { rings: LonLat[][]; color: string };
+type MapClickPopup =
+  | { type: "stop"; stopId: string }
+  | { type: "district"; name: string; position: Position };
 
 const DISTRICT_COLORS = [
   "#2563eb",
@@ -222,6 +227,35 @@ function assignDistrictColors(groups: Map<string, StadtteilFeature[]>): Map<stri
   }
 
   return colorByName;
+}
+
+function CategoryCard({
+  id,
+  title,
+  meta,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  meta: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="card question-category" data-cat={id}>
+      <button type="button" className="category-toggle" onClick={onToggle} aria-expanded={open}>
+        <span>
+          <span className="category-title">{title}</span>
+          <span className="meta small">{meta}</span>
+        </span>
+        <span className="poi-menu-arrow">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <div className="category-body">{children}</div>}
+    </div>
+  );
 }
 
 function randomId(): string {
@@ -728,6 +762,44 @@ function CenterButton({ position }: { position: Position | null }) {
   );
 }
 
+function MapClickResolver({
+  stops,
+  geojson,
+  districtLevel,
+  onStop,
+  onDistrict,
+}: {
+  stops: StopLike[];
+  geojson: StadtteileCollection | null;
+  districtLevel: MatchLevel | null;
+  onStop: (stopId: string) => void;
+  onDistrict: (name: string, position: Position) => void;
+}) {
+  const map = useMapEvents({
+    click(e) {
+      const clicked = map.latLngToLayerPoint(e.latlng);
+      let nearest: { stop: StopLike; px: number } | null = null;
+      for (const stop of stops) {
+        const point = map.latLngToLayerPoint([stop.lat, stop.lon]);
+        const px = clicked.distanceTo(point);
+        if (!nearest || px < nearest.px) nearest = { stop, px };
+      }
+
+      if (nearest && nearest.px <= 30) {
+        onStop(nearest.stop.id);
+        return;
+      }
+
+      if (!districtLevel) return;
+      const position = { lat: e.latlng.lat, lon: e.latlng.lng };
+      const district = findDistrictLabel(position, geojson, districtLevel);
+      if (district) onDistrict(district, position);
+    },
+  });
+
+  return null;
+}
+
 function copyText(value: string): void {
   navigator.clipboard.writeText(value).catch(() => {
     // ignore on unsupported clipboard
@@ -911,6 +983,7 @@ function App() {
 
   const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
   const [previewStopId, setPreviewStopId] = useState<string | null>(null);
+  const [mapClickPopup, setMapClickPopup] = useState<MapClickPopup | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const [hiderInputCode, setHiderInputCode] = useState("");
@@ -937,6 +1010,13 @@ function App() {
   const selectedMeasureType: MeasureType = MEASURE_TYPES[0]?.id ?? "";
   const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, number>>(() => lsGet("hs_usedFoto", {}));
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
+  const [questionCategoryOpen, setQuestionCategoryOpen] = useState<Record<string, boolean>>({
+    radar: true,
+    thermo: true,
+    matching: true,
+    measuring: true,
+    foto: true,
+  });
 
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>(() => lsGet("hs_askedCodes", {}));
   const [latestQuestionCode, setLatestQuestionCode] = useState(() => lsGet("hs_latestCode", ""));
@@ -1427,6 +1507,83 @@ function App() {
   }
 
   const displayedStops = role === "seeker" ? filteredStops : STOPS;
+  const clickableStops = role === "hider" && selectedStop ? [selectedStop] : displayedStops;
+  const visibleDistrictLevel = CITY.districtLevels.find((lvl) => borderVisible[lvl.id])?.id ?? null;
+
+  function isQuestionCategoryOpen(id: string): boolean {
+    return questionCategoryOpen[id] ?? true;
+  }
+
+  function toggleQuestionCategory(id: string): void {
+    setQuestionCategoryOpen((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
+  }
+
+  const mapLayerControls = (
+    <>
+      <div className="poi-menu">
+        <button className="poi-menu-toggle" onClick={() => setPoiMenuOpen((v) => !v)}>
+          <span className="poi-menu-arrow">{poiMenuOpen ? "▾" : "▸"}</span>
+          POI-Ebenen
+        </button>
+        {poiMenuOpen && (
+          <div className="poi-menu-list">
+            {CITY.districtLevels.map((lvl, idx) => (
+              <label key={lvl.id} className="poi-menu-item">
+                <input
+                  type="checkbox"
+                  checked={borderVisible[lvl.id] ?? false}
+                  onChange={() => setBorderVisible((prev) => ({ ...prev, [lvl.id]: !prev[lvl.id] }))}
+                />
+                <span className="poi-color-dot" style={{ background: BORDER_COLORS[idx % BORDER_COLORS.length] }} />
+                {`${lvl.borderLabel}n`}
+              </label>
+            ))}
+            <label className="poi-menu-item">
+              <input
+                type="checkbox"
+                checked={busLinesVisible}
+                onChange={() => setBusLinesVisible((v) => !v)}
+              />
+              <span className="poi-color-dot" style={{ background: "#e30613" }} />
+              Buslinien
+              {busLines && <span className="poi-count">({busLines.features.length})</span>}
+            </label>
+            {CITY.poiLayers.map((layer) => (
+              <label key={layer.id} className="poi-menu-item">
+                <input
+                  type="checkbox"
+                  checked={poiVisible[layer.id] ?? false}
+                  onChange={() => setPoiVisible((prev) => ({ ...prev, [layer.id]: !prev[layer.id] }))}
+                />
+                <span className="poi-color-dot" style={{ background: layer.color }} />
+                {layer.label}
+                {poiData[layer.id] && <span className="poi-count">({poiData[layer.id].features.length})</span>}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {busLinesVisible && busLines && (
+        <div className="poi-menu bus-legend">
+          <button className="poi-menu-toggle" onClick={() => setBusLegendOpen((v) => !v)}>
+            <span className="poi-menu-arrow">{busLegendOpen ? "▾" : "▸"}</span>
+            Buslinien-Legende
+          </button>
+          {busLegendOpen && (
+            <div className="poi-menu-list bus-legend-grid">
+              {busLines.features.map((f) => (
+                <span key={f.properties.route_id} className="bus-legend-item">
+                  <span className="bus-legend-line" style={{ background: f.properties.color }} />
+                  {f.properties.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="app-shell">
@@ -1504,6 +1661,8 @@ function App() {
       {(role === "hider" || role === "seeker") && (
         <main className="game-layout">
           <aside className="panel">
+            {mapLayerControls}
+
             {role === "hider" && (
               <>
                 <h2>Verstecker</h2>
@@ -1688,12 +1847,36 @@ function App() {
 
             {role === "seeker" && (
               <>
-                <h2>Sucher</h2>
-                <p className="meta">Erzeuge Fragen, sende den Code und trage die Antwort wieder ein.</p>
+                <div className="row" ref={questionCodeRowRef}>
+                  <textarea readOnly value={latestQuestionCode} />
+                  <button className="btn ghost" onClick={() => copyText(latestQuestionCode)}>
+                    Rauskopieren
+                  </button>
+                </div>
 
-                <div className="card" data-cat="radar">
-                  <h3>Radar</h3>
-                  <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
+                <div className="row">
+                  <label>Antwortcode eintragen</label>
+                  <textarea value={answerInput} onChange={(e) => setAnswerInput(e.target.value)} placeholder="A_RADAR_1A2B_JA" />
+                  <button className="btn" onClick={applyAnswerCode}>
+                    Antwort anwenden
+                  </button>
+                  <p className="meta">{answerFeedback}</p>
+                </div>
+
+                <div className="row">
+                  <label>Aktive Filter</label>
+                  <p className="meta small">
+                    {Object.keys(appliedAnswers).length} Antworten aktiv · {filteredStops.length} Haltestellen verbleiben
+                  </p>
+                </div>
+
+                <CategoryCard
+                  id="radar"
+                  title="Radar"
+                  meta="Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min"
+                  open={isQuestionCategoryOpen("radar")}
+                  onToggle={() => toggleQuestionCategory("radar")}
+                >
                   <label>Radius</label>
                   <div className="split-buttons">
                     <button className={`btn ghost q-btn${qBtnCls("RADAR_0.1", usedSubKeys)} ${radarPreset === "0.1" ? "active-btn" : ""}`} onClick={() => setRadarPreset("0.1")}>100 m</button>
@@ -1719,11 +1902,15 @@ function App() {
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
                   <button className="q-btn" onClick={() => generateQuestion("RADAR")}>Radar-Code erzeugen</button>
-                </div>
+                </CategoryCard>
 
-                <div className="card" data-cat="thermo">
-                  <h3>Thermometer</h3>
-                  <p className="meta small">Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
+                <CategoryCard
+                  id="thermo"
+                  title="Thermometer"
+                  meta="Belohnung: 2 Karten ziehen, 1 behalten · Zeitlimit: 3 min"
+                  open={isQuestionCategoryOpen("thermo")}
+                  onToggle={() => toggleQuestionCategory("thermo")}
+                >
                   <div className="split-buttons">
                     <button className={`btn ghost q-btn${qBtnCls("THERMO_PATH_0.75", usedSubKeys)}`} onClick={() => startThermometer(0.75)}>
                       Start 750 m
@@ -1747,11 +1934,15 @@ function App() {
                   </p>
                   <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
                   <button className="q-btn" onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
-                </div>
+                </CategoryCard>
 
-                <div className="card" data-cat="matching">
-                  <h3>Matching</h3>
-                  <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
+                <CategoryCard
+                  id="matching"
+                  title="Matching"
+                  meta="Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min"
+                  open={isQuestionCategoryOpen("matching")}
+                  onToggle={() => toggleQuestionCategory("matching")}
+                >
                   <div className="q-grid">
                     {CITY.districtLevels.map((lvl) => (
                       <button key={lvl.id} className={`q-btn${qBtnCls(`MATCH_DISTRICT_${lvl.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MATCH_DISTRICT", { level: lvl.id })}>{lvl.label}</button>
@@ -1770,27 +1961,35 @@ function App() {
                     </select>
                     <button className={`q-btn${selectedBusLine ? qBtnCls(`MATCH_BUSLINE_${selectedBusLine}`, usedSubKeys) : ""}`} onClick={() => generateQuestion("MATCH_BUSLINE")}>Buslinie →</button>
                   </div>
-                </div>
+                </CategoryCard>
 
-                <div className="card" data-cat="measuring">
-                  <h3>Measuring</h3>
-                  <p className="meta small">Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min</p>
+                <CategoryCard
+                  id="measuring"
+                  title="Measuring"
+                  meta="Belohnung: 3 Karten ziehen, 1 behalten · Zeitlimit: 3 min"
+                  open={isQuestionCategoryOpen("measuring")}
+                  onToggle={() => toggleQuestionCategory("measuring")}
+                >
                   <div className="q-grid">
                     {MEASURE_TYPES.map((m) => (
                       <button key={m.id} className={`q-btn${qBtnCls(`MEASURE_${m.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MEASURE", { measureType: m.id })}>{m.label}</button>
                     ))}
                   </div>
-                </div>
+                </CategoryCard>
 
-                <div className="card" data-cat="foto">
-                  <h3>Foto</h3>
-                  <p className="meta small">Belohnung: 1 Karte ziehen, 1 behalten · Zeitlimit: 10 min</p>
+                <CategoryCard
+                  id="foto"
+                  title="Foto"
+                  meta="Belohnung: 1 Karte ziehen, 1 behalten · Zeitlimit: 10 min"
+                  open={isQuestionCategoryOpen("foto")}
+                  onToggle={() => toggleQuestionCategory("foto")}
+                >
                   <div className="q-grid">
                     {FOTO_QUESTIONS.map((q) => (
                       <button key={q.id} className={`q-btn${(usedFotoQuestions[q.id] ?? 0) >= 2 ? " q-btn--exhausted" : (usedFotoQuestions[q.id] ?? 0) >= 1 ? " q-btn--used" : ""}`} onClick={() => setFotoConfirmQuestion(q.id)}>{q.label}</button>
                     ))}
                   </div>
-                </div>
+                </CategoryCard>
 
                 {fotoConfirmQuestion !== null && (() => {
                   const fq = FOTO_QUESTIONS.find((q) => q.id === fotoConfirmQuestion);
@@ -1819,28 +2018,6 @@ function App() {
                   );
                 })()}
 
-                <div className="row" ref={questionCodeRowRef}>
-                  <textarea readOnly value={latestQuestionCode} />
-                  <button className="btn ghost" onClick={() => copyText(latestQuestionCode)}>
-                    Rauskopieren
-                  </button>
-                </div>
-
-                <div className="row">
-                  <label>Antwortcode eintragen</label>
-                  <textarea value={answerInput} onChange={(e) => setAnswerInput(e.target.value)} placeholder="A_RADAR_1A2B_JA" />
-                  <button className="btn" onClick={applyAnswerCode}>
-                    Antwort anwenden
-                  </button>
-                  <p className="meta">{answerFeedback}</p>
-                </div>
-
-                <div className="row">
-                  <label>Aktive Filter</label>
-                  <p className="meta small">
-                    {Object.keys(appliedAnswers).length} Antworten aktiv · {filteredStops.length} Haltestellen verbleiben
-                  </p>
-                </div>
               </>
             )}
 
@@ -1851,68 +2028,6 @@ function App() {
               </div>
             )}
 
-            <div className="poi-menu">
-              <button className="poi-menu-toggle" onClick={() => setPoiMenuOpen((v) => !v)}>
-                <span className="poi-menu-arrow">{poiMenuOpen ? "▾" : "▸"}</span>
-                POI-Ebenen
-              </button>
-              {poiMenuOpen && (
-                <div className="poi-menu-list">
-                  {CITY.districtLevels.map((lvl, idx) => (
-                    <label key={lvl.id} className="poi-menu-item">
-                      <input
-                        type="checkbox"
-                        checked={borderVisible[lvl.id] ?? false}
-                        onChange={() => setBorderVisible((prev) => ({ ...prev, [lvl.id]: !prev[lvl.id] }))}
-                      />
-                      <span className="poi-color-dot" style={{ background: BORDER_COLORS[idx % BORDER_COLORS.length] }} />
-                      {`${lvl.borderLabel}n`}
-                    </label>
-                  ))}
-                  <label className="poi-menu-item">
-                    <input
-                      type="checkbox"
-                      checked={busLinesVisible}
-                      onChange={() => setBusLinesVisible((v) => !v)}
-                    />
-                    <span className="poi-color-dot" style={{ background: "#e30613" }} />
-                    Buslinien
-                    {busLines && <span className="poi-count">({busLines.features.length})</span>}
-                  </label>
-                  {CITY.poiLayers.map((layer) => (
-                    <label key={layer.id} className="poi-menu-item">
-                      <input
-                        type="checkbox"
-                        checked={poiVisible[layer.id] ?? false}
-                        onChange={() => setPoiVisible((prev) => ({ ...prev, [layer.id]: !prev[layer.id] }))}
-                      />
-                      <span className="poi-color-dot" style={{ background: layer.color }} />
-                      {layer.label}
-                      {poiData[layer.id] && <span className="poi-count">({poiData[layer.id].features.length})</span>}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {busLinesVisible && busLines && (
-              <div className="poi-menu bus-legend">
-                <button className="poi-menu-toggle" onClick={() => setBusLegendOpen((v) => !v)}>
-                  <span className="poi-menu-arrow">{busLegendOpen ? "▾" : "▸"}</span>
-                  Buslinien-Legende
-                </button>
-                {busLegendOpen && (
-                  <div className="poi-menu-list bus-legend-grid">
-                    {busLines.features.map((f) => (
-                      <span key={f.properties.route_id} className="bus-legend-item">
-                        <span className="bus-legend-line" style={{ background: f.properties.color }} />
-                        {f.properties.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </aside>
 
           <section className="map-wrap">
@@ -1925,6 +2040,19 @@ function App() {
               <RecenterOnPosition position={currentPos} />
               <CenterButton position={currentPos} />
               <ScaleControl position="bottomleft" imperial={false} />
+              <MapClickResolver
+                stops={clickableStops}
+                geojson={geojson}
+                districtLevel={visibleDistrictLevel}
+                onStop={(stopId) => {
+                  setPreviewStopId(stopId);
+                  setMapClickPopup({ type: "stop", stopId });
+                }}
+                onDistrict={(name, position) => {
+                  setPreviewStopId(null);
+                  setMapClickPopup({ type: "district", name, position });
+                }}
+              />
 
               {(() => {
                 // Hider: show only selected stop with permanent radius
@@ -1935,11 +2063,13 @@ function App() {
                         center={[selectedStop.lat, selectedStop.lon]}
                         radius={CITY.hideRadiusM}
                         pathOptions={{ color: "#0f172a", weight: 1.5, fillColor: "#94a3b8", fillOpacity: 0.15 }}
+                        interactive={false}
                       />
                       <CircleMarker
                         center={[selectedStop.lat, selectedStop.lon]}
                         radius={8}
                         pathOptions={{ color: "#0f172a", weight: 2.4, fillColor: "#dc2626", fillOpacity: 0.9 }}
+                        eventHandlers={{ click: () => setMapClickPopup(null) }}
                       >
                         <Popup>
                           <b>{selectedStop.name}</b>
@@ -1977,6 +2107,7 @@ function App() {
                             fillOpacity: 0.9,
                           }}
                           eventHandlers={{
+                            click: () => setMapClickPopup(null),
                             popupopen: () => setPreviewStopId(stop.id),
                             popupclose: () => setPreviewStopId(null),
                           }}
@@ -2013,9 +2144,8 @@ function App() {
                             key={`${lvl.id}-${name}-${ri}`}
                             positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
                             pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
-                          >
-                            {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
-                          </Polygon>
+                            interactive={false}
+                          />
                         ));
                       })
                     : null,
@@ -2081,6 +2211,50 @@ function App() {
                   )}
                 </>
               )}
+
+              {mapClickPopup?.type === "stop" && (() => {
+                const stop = STOPS.find((s) => s.id === mapClickPopup.stopId);
+                if (!stop) return null;
+                return (
+                  <Popup
+                    position={[stop.lat, stop.lon]}
+                    eventHandlers={{
+                      remove: () => setMapClickPopup((prev) => (prev?.type === "stop" && prev.stopId === stop.id ? null : prev)),
+                    }}
+                  >
+                    <b>{stop.name}</b>
+                    {role === "hider" && (
+                      <>
+                        <br />
+                        <button
+                          className="btn"
+                          style={{ marginTop: 8, width: "100%" }}
+                          onClick={() => setConfirmStopId(stop.id)}
+                        >
+                          Als Versteck auswählen
+                        </button>
+                      </>
+                    )}
+                  </Popup>
+                );
+              })()}
+
+              {mapClickPopup?.type === "district" && (() => {
+                const popup = mapClickPopup;
+                return (
+                  <Popup
+                    position={[popup.position.lat, popup.position.lon]}
+                    eventHandlers={{
+                      remove: () =>
+                        setMapClickPopup((prev) =>
+                          prev?.type === "district" && prev.name === popup.name ? null : prev,
+                        ),
+                    }}
+                  >
+                    <b>{popup.name}</b>
+                  </Popup>
+                );
+              })()}
             </MapContainer>
           </section>
         </main>

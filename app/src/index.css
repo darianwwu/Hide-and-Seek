@@ -220,7 +220,7 @@ textarea {
   }
 
   .map-wrap {
-    width: 85vw;
+    width: 90vw;
     aspect-ratio: 1 / 1;
     min-height: 0;
     justify-self: center;
@@ -406,6 +406,44 @@ textarea {
 .card[data-cat="matching"]  { --cat-color: #10b981; --cat-color-dark: #064e3b; --cat-bg: #ecfdf5; }
 .card[data-cat="measuring"] { --cat-color: #8b5cf6; --cat-color-dark: #3b0764; --cat-bg: #f5f3ff; }
 .card[data-cat="foto"]      { --cat-color: #f43f5e; --cat-color-dark: #881337; --cat-bg: #fff1f2; }
+
+.question-category {
+  gap: 10px;
+}
+
+.category-toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.category-title {
+  display: block;
+  margin: 0 0 2px;
+  color: var(--cat-color-dark, #172435);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.category-toggle .meta {
+  display: block;
+  margin: 0;
+}
+
+.category-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
 /* -- Question sub-type button grid --------------------- */
 .q-grid {
