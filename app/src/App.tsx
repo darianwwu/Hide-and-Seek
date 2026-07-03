@@ -51,74 +51,177 @@ const MEASURE_TYPES: { id: MeasureType; label: string }[] = [
   ...CITY.poiLayers.map((l) => ({ id: l.id, label: l.label })),
 ];
 
-const DISTRICT_COLORS = ["#e53935","#7b1fa2","#1565c0","#00695c","#e65100","#283593","#006064","#2e7d32","#f57f17","#4e342e","#0277bd","#558b2f"];
-function districtColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff;
-  return DISTRICT_COLORS[hash % DISTRICT_COLORS.length];
+type LonLat = [number, number];
+type DistrictShape = { rings: LonLat[][]; color: string };
+
+const DISTRICT_COLORS = [
+  "#2563eb",
+  "#dc2626",
+  "#16a34a",
+  "#d97706",
+  "#7c3aed",
+  "#0891b2",
+  "#be123c",
+  "#4d7c0f",
+  "#9333ea",
+  "#0f766e",
+  "#c2410c",
+  "#4338ca",
+];
+
+function ringArea(ring: LonLat[]): number {
+  let sum = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    sum += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  }
+  return sum / 2;
 }
 
-function dissolveFeatures(features: StadtteilFeature[]): [number, number][][] {
+function normalizedOuterRing(rawRing: number[][]): LonLat[] {
+  const ring = rawRing.map((p) => [p[0], p[1]] as LonLat);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first && last && (first[0] !== last[0] || first[1] !== last[1])) ring.push([first[0], first[1]]);
+  return ringArea(ring) < 0 ? [...ring].reverse() : ring;
+}
+
+function outerRings(feature: StadtteilFeature): LonLat[][] {
+  const geom = feature.geometry;
+  const rawRings: number[][][] =
+    geom.type === "Polygon"
+      ? [geom.coordinates[0] as number[][]]
+      : (geom.coordinates as number[][][][]).map((poly) => poly[0]);
+  return rawRings.map(normalizedOuterRing).filter((ring) => ring.length >= 4);
+}
+
+function dissolveFeatures(features: StadtteilFeature[]): LonLat[][] {
   const PREC = 6;
-  const pk = (x: number, y: number) => `${x.toFixed(PREC)},${y.toFixed(PREC)}`;
+  const pk = (p: LonLat) => `${p[0].toFixed(PREC)},${p[1].toFixed(PREC)}`;
+
+  type BoundaryEdge = {
+    key: string;
+    fromKey: string;
+    toKey: string;
+    from: LonLat;
+    to: LonLat;
+    visited: boolean;
+  };
 
   // Directed edge map: fwdKey -> edge data. Shared edges (A→B + B→A) cancel out.
-  const edgeMap = new Map<string, { fx: number; fy: number; tx: number; ty: number }>();
+  const edgeMap = new Map<string, BoundaryEdge>();
 
-  const addEdge = (ax: number, ay: number, bx: number, by: number) => {
-    const fwdKey = `${pk(ax, ay)}>${pk(bx, by)}`;
-    const revKey = `${pk(bx, by)}>${pk(ax, ay)}`;
+  const addEdge = (from: LonLat, to: LonLat) => {
+    const fromKey = pk(from);
+    const toKey = pk(to);
+    const fwdKey = `${fromKey}>${toKey}`;
+    const revKey = `${toKey}>${fromKey}`;
     if (edgeMap.has(revKey)) {
       edgeMap.delete(revKey);
     } else {
-      edgeMap.set(fwdKey, { fx: ax, fy: ay, tx: bx, ty: by });
+      edgeMap.set(fwdKey, { key: fwdKey, fromKey, toKey, from, to, visited: false });
     }
   };
 
   for (const feature of features) {
-    const geom = feature.geometry;
-    const outerRings: number[][][] =
-      geom.type === "Polygon"
-        ? [geom.coordinates[0] as number[][]]
-        : (geom.coordinates as number[][][][]).map((poly) => poly[0]);
-    for (const ring of outerRings) {
+    for (const ring of outerRings(feature)) {
       for (let i = 0; i < ring.length - 1; i++) {
-        addEdge(ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1]);
+        addEdge(ring[i], ring[i + 1]);
       }
     }
   }
 
-  // Build next-point and start-point lookups from remaining exterior edges
-  const nextPoint = new Map<string, [number, number]>();
-  const startPoints = new Map<string, [number, number]>();
+  const outgoing = new Map<string, BoundaryEdge[]>();
   for (const edge of edgeMap.values()) {
-    const fromKey = pk(edge.fx, edge.fy);
-    nextPoint.set(fromKey, [edge.tx, edge.ty]);
-    startPoints.set(fromKey, [edge.fx, edge.fy]);
+    if (!outgoing.has(edge.fromKey)) outgoing.set(edge.fromKey, []);
+    outgoing.get(edge.fromKey)!.push(edge);
   }
 
-  const visited = new Set<string>();
-  const result: [number, number][][] = [];
+  const turnScore = (prev: BoundaryEdge, next: BoundaryEdge): number => {
+    const a1 = Math.atan2(prev.to[1] - prev.from[1], prev.to[0] - prev.from[0]);
+    const a2 = Math.atan2(next.to[1] - next.from[1], next.to[0] - next.from[0]);
+    let turn = a2 - a1;
+    while (turn <= 0) turn += Math.PI * 2;
+    return turn;
+  };
 
-  for (const [startKey, startPt] of startPoints) {
-    if (visited.has(startKey)) continue;
-    const ring: [number, number][] = [startPt];
-    visited.add(startKey);
-    let cur = startPt;
-    for (let steps = 0; steps < 100000; steps++) {
-      const nxt = nextPoint.get(pk(cur[0], cur[1]));
-      if (!nxt) break;
-      const nxtKey = pk(nxt[0], nxt[1]);
-      if (nxtKey === startKey) break;
-      if (visited.has(nxtKey)) break;
-      ring.push(nxt);
-      visited.add(nxtKey);
-      cur = nxt;
+  const result: LonLat[][] = [];
+  const minRingArea = 1e-7;
+
+  for (const startEdge of edgeMap.values()) {
+    if (startEdge.visited) continue;
+    const ring: LonLat[] = [startEdge.from];
+    let current = startEdge;
+    let closed = false;
+
+    for (let steps = 0; steps < edgeMap.size + 5; steps++) {
+      current.visited = true;
+      ring.push(current.to);
+
+      if (current.toKey === startEdge.fromKey) {
+        closed = true;
+        break;
+      }
+
+      const candidates = (outgoing.get(current.toKey) ?? []).filter((edge) => !edge.visited);
+      if (candidates.length === 0) break;
+      current = candidates.reduce((best, edge) => (turnScore(current, edge) > turnScore(current, best) ? edge : best));
     }
-    if (ring.length >= 3) result.push([...ring, ring[0]]);
+
+    if (closed && ring.length >= 4 && Math.abs(ringArea(ring)) > minRingArea) result.push(ring);
   }
 
   return result;
+}
+
+function buildDistrictAdjacency(groups: Map<string, StadtteilFeature[]>): Map<string, Set<string>> {
+  const PREC = 6;
+  const pk = (p: LonLat) => `${p[0].toFixed(PREC)},${p[1].toFixed(PREC)}`;
+  const edgeOwners = new Map<string, Set<string>>();
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const name of groups.keys()) adjacency.set(name, new Set());
+
+  for (const [name, features] of groups) {
+    for (const feature of features) {
+      for (const ring of outerRings(feature)) {
+        for (let i = 0; i < ring.length - 1; i++) {
+          const a = pk(ring[i]);
+          const b = pk(ring[i + 1]);
+          const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+          if (!edgeOwners.has(key)) edgeOwners.set(key, new Set());
+          edgeOwners.get(key)!.add(name);
+        }
+      }
+    }
+  }
+
+  for (const owners of edgeOwners.values()) {
+    const names = [...owners];
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        adjacency.get(names[i])!.add(names[j]);
+        adjacency.get(names[j])!.add(names[i]);
+      }
+    }
+  }
+
+  return adjacency;
+}
+
+function assignDistrictColors(groups: Map<string, StadtteilFeature[]>): Map<string, string> {
+  const adjacency = buildDistrictAdjacency(groups);
+  const colorByName = new Map<string, string>();
+  const names = [...groups.keys()].sort((a, b) => {
+    const degreeDiff = (adjacency.get(b)?.size ?? 0) - (adjacency.get(a)?.size ?? 0);
+    return degreeDiff || a.localeCompare(b, "de");
+  });
+
+  for (const name of names) {
+    const used = new Set([...adjacency.get(name)!].map((neighbor) => colorByName.get(neighbor)).filter(Boolean));
+    colorByName.set(name, DISTRICT_COLORS.find((color) => !used.has(color)) ?? DISTRICT_COLORS[0]);
+  }
+
+  return colorByName;
 }
 
 function randomId(): string {
@@ -213,13 +316,13 @@ function encodeAnswerCode(payload: AnswerCode): string {
 }
 
 function decodeCode(raw: string): QuestionCode | AnswerCode {
-  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:[\.,]\d+)?)km$/i);
+  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:[.,]\d+)?)km$/i);
   if (radarQ) {
     const center = parseCoordPair(radarQ[2]);
     return { qid: radarQ[1].toUpperCase(), type: "RADAR", payload: { center, radiusKm: parseLocaleNumber(radarQ[3]) } };
   }
 
-  const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)(?:_(\d+(?:[\.,]\d+)?)km)?$/i);
+  const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)(?:_(\d+(?:[.,]\d+)?)km)?$/i);
   if (thermoQ) {
     const payload: Record<string, unknown> = { start: parseCoordPair(thermoQ[2]), end: parseCoordPair(thermoQ[3]) };
     if (thermoQ[4]) payload.targetKm = parseLocaleNumber(thermoQ[4]);
@@ -302,7 +405,7 @@ function decodeCode(raw: string): QuestionCode | AnswerCode {
     return { qid: mstrA[1].toUpperCase(), type: "MATCH_STREET", answer: { match: mstrA[2].toUpperCase() === "JA" } };
   }
 
-  const measQ = raw.match(/^MEAS_([A-Z0-9]{4})_([a-z_]+)_(\d+(?:[\.,]\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
+  const measQ = raw.match(/^MEAS_([A-Z0-9]{4})_([a-z_]+)_(\d+(?:[.,]\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
   if (measQ) {
     return {
       qid: measQ[1].toUpperCase(),
@@ -565,11 +668,12 @@ function isPointExcluded(
 function useCurrentLocation() {
   const [position, setPosition] = useState<Position | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState<string>(() =>
+    navigator.geolocation ? "" : "Geolocation wird von diesem Browser nicht unterstützt.",
+  );
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setError("Geolocation wird von diesem Browser nicht unterstützt.");
       return;
     }
     const watcher = navigator.geolocation.watchPosition(
@@ -873,7 +977,7 @@ function App() {
 
   useEffect(() => {
     CITY.poiLayers.forEach((layer) => {
-      fetch(`${import.meta.env.BASE_URL}pois/${layer.file}`)
+      fetch(`${import.meta.env.BASE_URL}${CITY.poiBasePath}${layer.file}`)
         .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           return res.json() as Promise<PoiCollection>;
@@ -882,7 +986,7 @@ function App() {
         .catch(() => { /* silently skip unavailable layers */ });
     });
 
-    fetch(`${import.meta.env.BASE_URL}pois/buslinien.geojson`)
+    fetch(`${import.meta.env.BASE_URL}${CITY.busLinesFile}`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<BusLineCollection>;
@@ -892,7 +996,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}stadtteile-muenster.geojson`)
+    fetch(`${import.meta.env.BASE_URL}${CITY.stadtteileFile}`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<unknown>;
@@ -902,7 +1006,7 @@ function App() {
         setGeojson(collection);
       })
       .catch((err: Error) => {
-        fetch("./stadtteile-muenster.geojson")
+        fetch(`./${CITY.stadtteileFile}`)
           .then((res) => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json() as Promise<unknown>;
@@ -937,14 +1041,13 @@ function App() {
     return Number(radarPreset);
   }, [radarCustomKmInput, radarPreset]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- Thermometer state follows external geolocation updates. */
   useEffect(() => {
     if (!thermoTracking.active || !currentPos) return;
-    if (!thermoTracking.lastPos) {
-      setThermoTracking((prev) => ({ ...prev, lastPos: currentPos }));
-      return;
-    }
+    const lastPos = thermoTracking.lastPos;
+    if (!lastPos) return;
 
-    const deltaKm = haversineKm(thermoTracking.lastPos, currentPos);
+    const deltaKm = haversineKm(lastPos, currentPos);
     if (deltaKm < 0.005) return;
 
     const nextWalked = thermoTracking.walkedKm + deltaKm;
@@ -959,6 +1062,7 @@ function App() {
 
     setThermoTracking((prev) => ({ ...prev, walkedKm: nextWalked, lastPos: currentPos }));
   }, [currentPos, thermoTracking]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const activeAnswers = useMemo(() => {
     const answers = Object.values(appliedAnswers);
@@ -972,7 +1076,7 @@ function App() {
   }, [appliedAnswers, askedCodes]);
 
   const districtGroupsByLevel = useMemo(() => {
-    const out = new Map<string, Map<string, [number, number][][]>>();
+    const out = new Map<string, Map<string, DistrictShape>>();
     if (!geojson) return out;
     for (const level of CITY.districtLevels) {
       const groups = new Map<string, StadtteilFeature[]>();
@@ -982,8 +1086,14 @@ function App() {
         if (!groups.has(name)) groups.set(name, []);
         groups.get(name)!.push(feat);
       }
-      const dissolved = new Map<string, [number, number][][]>();
-      for (const [name, feats] of groups) dissolved.set(name, dissolveFeatures(feats));
+      const colors = assignDistrictColors(groups);
+      const dissolved = new Map<string, DistrictShape>();
+      for (const [name, feats] of groups) {
+        dissolved.set(name, {
+          rings: dissolveFeatures(feats),
+          color: colors.get(name) ?? DISTRICT_COLORS[0],
+        });
+      }
       out.set(level.id, dissolved);
     }
     return out;
@@ -1391,7 +1501,7 @@ function App() {
         </main>
       )}
 
-      {role !== "landing" && (
+      {(role === "hider" || role === "seeker") && (
         <main className="game-layout">
           <aside className="panel">
             {role === "hider" && (
@@ -1893,22 +2003,24 @@ function App() {
                 );
               })()}
 
-              {CITY.districtLevels.map((lvl) =>
-                borderVisible[lvl.id]
-                  ? [...(districtGroupsByLevel.get(lvl.id)?.entries() ?? [])].flatMap(([name, rings]) => {
-                      const color = districtColor(name);
-                      return rings.map((ring, ri) => (
-                        <Polygon
-                          key={`${lvl.id}-${name}-${ri}`}
-                          positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
-                          pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
-                        >
-                          {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
-                        </Polygon>
-                      ));
-                    })
-                  : null,
-              )}
+              <Pane name="districtBorders" style={{ zIndex: 320 }}>
+                {CITY.districtLevels.map((lvl) =>
+                  borderVisible[lvl.id]
+                    ? [...(districtGroupsByLevel.get(lvl.id)?.entries() ?? [])].flatMap(([name, shape]) => {
+                        const color = shape.color;
+                        return shape.rings.map((ring, ri) => (
+                          <Polygon
+                            key={`${lvl.id}-${name}-${ri}`}
+                            positions={ring.map(([lon, lat]) => [lat, lon] as [number, number])}
+                            pathOptions={{ color, weight: 2, fillColor: color, fillOpacity: 0.08 }}
+                          >
+                            {ri === 0 && <Tooltip sticky>{name}</Tooltip>}
+                          </Polygon>
+                        ));
+                      })
+                    : null,
+                )}
+              </Pane>
 
               {busLinesVisible && busLines && busLines.features.map((feature) => {
                 const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]);
@@ -1973,6 +2085,7 @@ function App() {
           </section>
         </main>
       )}
+
     </div>
   );
 }

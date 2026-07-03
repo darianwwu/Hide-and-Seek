@@ -771,7 +771,6 @@ test.describe("Full Round-Trip Scenarios", () => {
     await selectRole(page, "seeker");
     await page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
-    const qid = questionCode.match(/^RADAR_([A-Z0-9]{4})_/)![1];
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await selectRole(page, "hider");
     await selectHideout(page, "prinzipalmarkt");

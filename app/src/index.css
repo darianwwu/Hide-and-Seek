@@ -69,10 +69,12 @@ body {
 .game-layout {
   display: grid;
   grid-template-columns: 370px 1fr;
+  grid-template-areas: "panel map";
   min-height: calc(100vh - 58px);
 }
 
 .panel {
+  grid-area: panel;
   background: #f8fbff;
   border-right: 1px solid #d9e8f5;
   padding: 14px;
@@ -164,6 +166,7 @@ textarea {
 }
 
 .map-wrap {
+  grid-area: map;
   min-height: 580px;
 }
 
@@ -206,15 +209,22 @@ textarea {
 @media (max-width: 980px) {
   .game-layout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "map"
+      "panel";
   }
 
   .panel {
     border-right: none;
-    border-bottom: 1px solid #d9e8f5;
+    border-top: 1px solid #d9e8f5;
   }
 
   .map-wrap {
-    min-height: 60vh;
+    width: 85vw;
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    justify-self: center;
+    margin: 12px 0;
   }
 }
 

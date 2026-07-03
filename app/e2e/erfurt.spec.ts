@@ -74,6 +74,15 @@ test.describe("Erfurt city", () => {
     await expect(page.locator(".leaflet-interactive").first()).toBeVisible();
   });
 
+  test("POI categories: Tankstelle + Apotheke added, Krankenhaus removed", async ({ page }) => {
+    await erfurtStart(page);
+    await selectRole(page, "seeker");
+    const matching = page.locator("[data-cat='matching']");
+    await expect(matching.getByRole("button", { name: "Tankstelle", exact: true })).toBeVisible();
+    await expect(matching.getByRole("button", { name: "Apotheke", exact: true })).toBeVisible();
+    await expect(matching.getByRole("button", { name: "Krankenhaus", exact: true })).toHaveCount(0);
+  });
+
   test("hider evaluates an Ortsteil match against an Erfurt hideout", async ({ page }) => {
     await erfurtStart(page);
     await page.evaluate(() => {
@@ -81,12 +90,15 @@ test.describe("Erfurt city", () => {
       localStorage.setItem("hs_role", JSON.stringify("hider"));
     });
     await page.reload();
+    // Reference point == the Anger hideout's own location, so a correctly loaded
+    // Erfurt Stadtteile layer must resolve both to the same Ortsteil -> JA.
+    // (Under the old bug it loaded Münster districts and always returned NEIN.)
     await page.getByPlaceholder(PH).fill("MATCH_AB12_O_50.97639;11.03437");
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
     await expect(page.getByText(/gleichen Ortsteil/)).toBeVisible();
     await page.getByRole("button", { name: "Code auswerten" }).click();
     const ans = page.locator(".card textarea[readonly]");
     await expect(ans).toBeVisible({ timeout: 10_000 });
-    expect(await ans.inputValue()).toMatch(/^A_MATCH_AB12_(JA|NEIN)$/);
+    expect(await ans.inputValue()).toBe("A_MATCH_AB12_JA");
   });
 });
