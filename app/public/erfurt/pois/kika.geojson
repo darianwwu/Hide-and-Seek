@@ -1,0 +1,19 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "properties": { "NAME": "Bernd das Brot" }, "geometry": { "type": "Point", "coordinates": [11.0290594, 50.9781393] } },
+    { "type": "Feature", "properties": { "NAME": "Sandmännchen" }, "geometry": { "type": "Point", "coordinates": [11.0299855, 50.9791856] } },
+    { "type": "Feature", "properties": { "NAME": "Maus und Elefant" }, "geometry": { "type": "Point", "coordinates": [11.0344557, 50.9765188] } },
+    { "type": "Feature", "properties": { "NAME": "Tigerente" }, "geometry": { "type": "Point", "coordinates": [11.0292663, 50.9773452] } },
+    { "type": "Feature", "properties": { "NAME": "Tabaluga" }, "geometry": { "type": "Point", "coordinates": [11.0297897, 50.9740636] } },
+    { "type": "Feature", "properties": { "NAME": "Käpt'n Blaubär und Hein Blöd" }, "geometry": { "type": "Point", "coordinates": [11.0309898, 50.9773344] } },
+    { "type": "Feature", "properties": { "NAME": "Kikaninchen" }, "geometry": { "type": "Point", "coordinates": [11.0309131, 50.9797313] } },
+    { "type": "Feature", "properties": { "NAME": "Goldener Spatz" }, "geometry": { "type": "Point", "coordinates": [11.0337293, 50.9742887] } },
+    { "type": "Feature", "properties": { "NAME": "Pittiplatsch" }, "geometry": { "type": "Point", "coordinates": [11.0310170, 50.9784504] } },
+    { "type": "Feature", "properties": { "NAME": "Schnatterinchen und Moppi" }, "geometry": { "type": "Point", "coordinates": [11.0309405, 50.9792114] } },
+    { "type": "Feature", "properties": { "NAME": "Herr Fuchs und Frau Elster" }, "geometry": { "type": "Point", "coordinates": [11.0179355, 50.9751475] } },
+    { "type": "Feature", "properties": { "NAME": "Fidi" }, "geometry": { "type": "Point", "coordinates": [11.0194609, 50.9775524] } },
+    { "type": "Feature", "properties": { "NAME": "Rabe Rudi und Koffer" }, "geometry": { "type": "Point", "coordinates": [10.9611530, 50.9750362] } },
+    { "type": "Feature", "properties": { "NAME": "Jan und Henry" }, "geometry": { "type": "Point", "coordinates": [11.0258320, 51.0208981] } }
+  ]
+}

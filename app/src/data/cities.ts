@@ -159,13 +159,14 @@ const muenster: CityConfig = {
 const ERFURT_POI_LAYERS: PoiLayerConfig[] = [
   { id: "kitas", label: "Kita", file: "kitas.geojson", color: "#fdd835", nameKey: "NAME" },
   { id: "schulen", label: "Schule", file: "schulen.geojson", color: "#9c27b0", nameKey: "NAME" },
-  { id: "sportstaetten", label: "Sportstätte", file: "sportstaetten.geojson", color: "#4caf50", nameKey: "NAME" },
+  { id: "sportstaetten", label: "Sportstätte", file: "sportstaetten.geojson", color: "#2e8a31", nameKey: "NAME" },
   { id: "friedhoefe", label: "Friedhof", file: "friedhoefe.geojson", color: "#607d8b", nameKey: "NAME" },
   { id: "museen", label: "Museum", file: "museen.geojson", color: "#3f51b5", nameKey: "NAME" },
   { id: "buechereien", label: "Bücherei", file: "buechereien.geojson", color: "#00bcd4", nameKey: "NAME" },
   { id: "baeder", label: "Bad", file: "baeder.geojson", color: "#2196f3", nameKey: "NAME" },
   { id: "tankstellen", label: "Tankstelle", file: "tankstellen.geojson", color: "#ff7043", nameKey: "NAME" },
   { id: "apotheken", label: "Apotheke", file: "apotheken.geojson", color: "#009688", nameKey: "NAME" },
+  { id: "kika", label: "KiKA-Figur", file: "kika.geojson", color: "#77ff41", nameKey: "NAME" },
 ];
 
 const erfurt: CityConfig = {

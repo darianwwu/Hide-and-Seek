@@ -252,15 +252,6 @@ test.describe("Hider Panel", () => {
     await expect(page.locator(".question-preview-text")).toContainText("Linie 1");
   });
 
-  test("pasting a valid MSTR code shows street matching preview", async ({ page }) => {
-    await mockGeo(page);
-    await freshStart(page);
-    await selectRole(page, "hider");
-    await page.getByPlaceholder(PH).fill("MSTR_KL12_51.96250;7.62830_Prinzipalmarkt");
-    await expect(page.locator(".question-preview-overlay")).toBeVisible();
-    await expect(page.locator(".question-preview-text")).toContainText("Prinzipalmarkt");
-  });
-
   test("pasting a valid MEAS code shows measuring preview", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
@@ -377,35 +368,56 @@ test.describe("Hider Panel", () => {
     await expect(page.locator(".question-preview-overlay")).not.toBeVisible();
   });
 
-  test("small RADAR (0.1km) preview shows GPS note", async ({ page }) => {
+  test("small exact RADAR (0.1km;GPS) preview shows GPS note", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
     await selectRole(page, "hider");
-    await page.getByPlaceholder(PH).fill("RADAR_AB12_51.96250;7.62830;0,1km");
+    await page.getByPlaceholder(PH).fill("RADAR_AB12_51.96250;7.62830;0,1km;GPS");
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
     await expect(page.locator(".question-preview-box")).toContainText("exakter GPS-Standort");
   });
 
-  test("evaluating small RADAR (0.1km) uses GPS – JA when GPS at center, stop far away", async ({ page }) => {
+  test("non-exact RADAR (no GPS flag) preview shows Haltestelle note", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await page.getByPlaceholder(PH).fill("RADAR_AB12_51.96250;7.62830;0,5km");
+    await expect(page.locator(".question-preview-overlay")).toBeVisible();
+    await expect(page.locator(".question-preview-box")).toContainText("gewählte Haltestelle");
+    await expect(page.locator(".question-preview-box")).not.toContainText("exakter GPS-Standort");
+  });
+
+  test("evaluating exact RADAR (0.1km;GPS) uses GPS – JA when GPS at center, stop far away", async ({ page }) => {
     // GPS near radar center; far-away bus stop must NOT be used
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
     await selectRole(page, "hider");
     await selectHideout(page, "im brook");
     await waitForGps(page);
-    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km");
+    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km;GPS");
     expect(answerCode).toBe("A_RADAR_AB12_JA");
   });
 
-  test("evaluating small RADAR (0.1km) uses GPS – NEIN when GPS far away, stop near center", async ({ page }) => {
+  test("evaluating exact RADAR (0.1km;GPS) uses GPS – NEIN when GPS far away, stop near center", async ({ page }) => {
     // GPS far from radar center; near bus stop must NOT be used
     await mockGeo(page, 52.0, 8.0);
     await freshStart(page);
     await selectRole(page, "hider");
     await selectHideout(page, "prinzipalmarkt");
     await waitForGps(page);
-    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km");
+    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,1km;GPS");
     expect(answerCode).toBe("A_RADAR_AB12_NEIN");
+  });
+
+  test("non-exact 500m RADAR uses the bus stop, not GPS", async ({ page }) => {
+    // GPS far away, but hideout (bus stop) is at the radar centre → JA via the stop
+    await mockGeo(page, 52.0, 8.0);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await selectHideout(page, "prinzipalmarkt");
+    await waitForGps(page);
+    const answerCode = await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;0,5km");
+    expect(answerCode).toBe("A_RADAR_AB12_JA");
   });
 });
 
@@ -505,18 +517,19 @@ test.describe("Seeker Panel - UI Structure", () => {
     await expect(card.getByText("Aktiv: 2 km")).toBeVisible();
   });
 
-  test("small radar presets show GPS note, large presets hide it", async ({ page }) => {
+  test("only 100m/250m presets show the exact-GPS note", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
     await selectRole(page, "seeker");
     const card = page.locator("[data-cat='radar']");
-    for (const label of ["100 m", "250 m", "500 m"]) {
+    for (const label of ["100 m", "250 m"]) {
       await card.getByRole("button", { name: label }).click();
       await expect(card.getByText(/exakten GPS-Standort/)).toBeVisible();
     }
-    for (const label of ["1 km", "2 km"]) {
+    for (const label of ["500 m", "1 km", "2 km"]) {
       await card.getByRole("button", { name: label }).click();
       await expect(card.getByText(/exakten GPS-Standort/)).not.toBeVisible();
+      await expect(card.getByText(/gewählte Haltestelle/)).toBeVisible();
     }
   });
 
@@ -588,6 +601,37 @@ test.describe("Seeker Question Code Generation", () => {
     await expect(codeArea).not.toHaveValue("");
     const code = await codeArea.inputValue();
     expect(code).toMatch(/^RADAR_[A-Z0-9]{4}_\d+\.\d+;\d+\.\d+;\d+(?:,\d+)?km$/);
+  });
+
+  test("100m preset generates an exact radar code with ;GPS suffix", async ({ page }) => {
+    await mockGeo(page, 51.9625, 7.6283);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    const card = page.locator("[data-cat='radar']");
+    await card.getByRole("button", { name: "100 m" }).click();
+    await card.getByRole("button", { name: "Radar-Code erzeugen" }).click();
+    const code = await page.locator("textarea[readonly]").first().inputValue();
+    expect(code).toMatch(/;0,1km;GPS$/);
+  });
+
+  test("500m preset generates a bus-stop radar code without ;GPS", async ({ page }) => {
+    await mockGeo(page, 51.9625, 7.6283);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    const card = page.locator("[data-cat='radar']");
+    await card.getByRole("button", { name: "500 m" }).click();
+    await card.getByRole("button", { name: "Radar-Code erzeugen" }).click();
+    const code = await page.locator("textarea[readonly]").first().inputValue();
+    expect(code).toMatch(/;0,5km$/);
+    expect(code).not.toContain("GPS");
+  });
+
+  test("Straße matching question is no longer offered", async ({ page }) => {
+    await mockGeo(page, 51.9625, 7.6283);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    const card = page.locator("[data-cat='matching']");
+    await expect(card.getByRole("button", { name: "Straße", exact: true })).toHaveCount(0);
   });
 
   test("matching bezirk code is generated", async ({ page }) => {
@@ -855,5 +899,154 @@ test.describe("Seeker Stop Filtering", () => {
     const text = await page.getByText(/Haltestellen verbleiben/).textContent();
     const count = parseInt(text!.match(/(\d+) Haltestellen/)?.[1] ?? "999");
     expect(count).toBeLessThan(50);
+  });
+});
+
+// ── Marker Clustering ─────────────────────────────────────────
+
+// Reads the metric scale bar (bottom-left) and returns its value in metres.
+async function scaleMeters(page: Page): Promise<number> {
+  const txt = (await page.locator(".leaflet-control-scale-line").first().textContent()) ?? "";
+  const m = txt.match(/([\d.,]+)\s*(m|km)/);
+  if (!m) return NaN;
+  const val = parseFloat(m[1].replace(",", "."));
+  return m[2] === "km" ? val * 1000 : val;
+}
+
+async function zoomUntil(page: Page, dir: "in" | "out", predicate: (m: number) => boolean) {
+  const btn = page.locator(dir === "in" ? ".leaflet-control-zoom-in" : ".leaflet-control-zoom-out");
+  for (let i = 0; i < 8; i++) {
+    if (predicate(await scaleMeters(page))) return;
+    await btn.click();
+    await page.waitForTimeout(450); // wait out the zoom animation + re-render
+  }
+}
+
+test.describe("Marker Clustering", () => {
+  test("clusters appear when zoomed out (scale > 500 m) and vanish when zoomed in", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    await waitForMap(page);
+    await waitForGps(page);
+
+    // Zoom out until the scale bar reads more than 500 m → clustering active.
+    await zoomUntil(page, "out", (m) => m > 500);
+    expect(await scaleMeters(page)).toBeGreaterThan(500);
+    await expect(page.locator(".cluster-marker").first()).toBeVisible({ timeout: 5_000 });
+
+    // Zoom in until the scale bar reads 500 m or less → clustering off.
+    await zoomUntil(page, "in", (m) => m <= 500 && Number.isFinite(m));
+    expect(await scaleMeters(page)).toBeLessThanOrEqual(500);
+    await expect(page.locator(".cluster-marker")).toHaveCount(0);
+  });
+
+  test("cluster badges show the number of grouped stops (>= 2)", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    await waitForMap(page);
+    await waitForGps(page);
+
+    await zoomUntil(page, "out", (m) => m > 500);
+    await expect(page.locator(".cluster-marker").first()).toBeVisible({ timeout: 5_000 });
+
+    const labels = await page.locator(".cluster-marker span").allTextContents();
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(Number(label)).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  test("hider also sees clustered stops when zoomed out", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await waitForMap(page);
+    await waitForGps(page);
+
+    await zoomUntil(page, "out", (m) => m > 500);
+    await expect(page.locator(".cluster-marker").first()).toBeVisible({ timeout: 5_000 });
+  });
+});
+
+// ── Busline Question Hint ─────────────────────────────────────
+
+test.describe("Busline Question Hint", () => {
+  async function seekerWithLines(page: Page) {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    await waitForMap(page);
+    await waitForGps(page);
+    const select = page.locator(".q-busline-row select");
+    // Wait for bus lines to load (more than just the placeholder option).
+    await expect.poll(async () => select.locator("option").count()).toBeGreaterThan(1);
+    return select;
+  }
+
+  test("clicking Buslinie without a selection warns to pick a line", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    await waitForMap(page);
+    await page.getByRole("button", { name: /Buslinie/ }).click();
+    await expect(page.getByText("Bitte eine Buslinie auswählen.")).toBeVisible();
+    await expect(page.locator(".question-preview-overlay")).not.toBeVisible();
+  });
+
+  test("selecting a line shows the bus/tram hint popup", async ({ page }) => {
+    const select = await seekerWithLines(page);
+    await select.selectOption({ index: 1 });
+    await page.getByRole("button", { name: /Buslinie/ }).click();
+    await expect(page.locator(".question-preview-overlay")).toBeVisible();
+    await expect(page.locator(".question-preview-box")).toContainText(/Bus oder einer Straßenbahn/);
+  });
+
+  test("confirming the hint generates an MBUS question code", async ({ page }) => {
+    const select = await seekerWithLines(page);
+    await select.selectOption({ index: 1 });
+    await page.getByRole("button", { name: /Buslinie/ }).click();
+    await page.getByRole("button", { name: "Ja, stellen" }).click();
+    await expect(page.locator(".question-preview-overlay")).not.toBeVisible();
+    await expect(page.locator("textarea[readonly]").first()).toHaveValue(/^MBUS_/);
+  });
+
+  test("Abbrechen closes the hint without generating a code", async ({ page }) => {
+    const select = await seekerWithLines(page);
+    await select.selectOption({ index: 1 });
+    await page.getByRole("button", { name: /Buslinie/ }).click();
+    await page.getByRole("button", { name: "Abbrechen" }).click();
+    await expect(page.locator(".question-preview-overlay")).not.toBeVisible();
+    await expect(page.locator("textarea[readonly]").first()).toHaveValue("");
+  });
+});
+
+// ── Seeker Radar Area Drawing ─────────────────────────────────
+
+test.describe("Seeker Radar Area Drawing", () => {
+  async function askRadarAndAnswer(page: Page, presetLabel: string) {
+    await mockGeo(page, 51.9625, 7.6283);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    await waitForMap(page);
+    const card = page.locator("[data-cat='radar']");
+    await card.getByRole("button", { name: presetLabel }).click();
+    await card.getByRole("button", { name: "Radar-Code erzeugen" }).click();
+    const code = await page.locator("textarea[readonly]").first().inputValue();
+    const qid = code.match(/^RADAR_([A-Z0-9]{4})_/)![1];
+    await page.getByPlaceholder("A_RADAR_1A2B_JA").fill(`A_RADAR_${qid}_JA`);
+    await page.getByRole("button", { name: "Antwort anwenden" }).click();
+    await expect(page.getByText(/Antwort angewendet/)).toBeVisible();
+  }
+
+  test("exact radar (100 m) draws an area on the map", async ({ page }) => {
+    await askRadarAndAnswer(page, "100 m");
+    await expect(page.locator(".leaflet-radarAreas-pane path")).toHaveCount(1);
+  });
+
+  test("non-exact radar (500 m) draws no area on the map", async ({ page }) => {
+    await askRadarAndAnswer(page, "500 m");
+    await expect(page.locator(".leaflet-radarAreas-pane path")).toHaveCount(0);
   });
 });

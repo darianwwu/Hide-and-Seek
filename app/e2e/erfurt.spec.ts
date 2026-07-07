@@ -71,7 +71,13 @@ test.describe("Erfurt city", () => {
     await erfurtStart(page);
     await selectRole(page, "seeker");
     await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 15_000 });
-    await expect(page.locator(".leaflet-interactive").first()).toBeVisible();
+    // Wait for a stop marker that has actually been projected (not the momentary
+    // "M0 0" degenerate path Leaflet emits before the view settles).
+    await expect
+      .poll(async () =>
+        page.locator('.leaflet-interactive[d]:not([d="M0 0"])').count(),
+      )
+      .toBeGreaterThan(0);
   });
 
   test("POI categories: Tankstelle + Apotheke added, Krankenhaus removed", async ({ page }) => {
@@ -81,6 +87,26 @@ test.describe("Erfurt city", () => {
     await expect(matching.getByRole("button", { name: "Tankstelle", exact: true })).toBeVisible();
     await expect(matching.getByRole("button", { name: "Apotheke", exact: true })).toBeVisible();
     await expect(matching.getByRole("button", { name: "Krankenhaus", exact: true })).toHaveCount(0);
+  });
+
+  test("KiKA-Figur POI category appears in Matching and Measuring", async ({ page }) => {
+    await erfurtStart(page);
+    await selectRole(page, "seeker");
+    await expect(
+      page.locator("[data-cat='matching']").getByRole("button", { name: "KiKA-Figur", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.locator("[data-cat='measuring']").getByRole("button", { name: "KiKA-Figur", exact: true }),
+    ).toBeVisible();
+  });
+
+  test("KiKA-Figur match generates an MPOI_..._kika code", async ({ page }) => {
+    await erfurtStart(page);
+    await selectRole(page, "seeker");
+    await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 15_000 });
+    await page.locator("[data-cat='matching']").getByRole("button", { name: "KiKA-Figur", exact: true }).click();
+    const code = await page.locator("textarea[readonly]").first().inputValue();
+    expect(code).toMatch(/^MPOI_[A-Z0-9]{4}_kika_\d+\.\d+;\d+\.\d+_.+$/);
   });
 
   test("hider evaluates an Ortsteil match against an Erfurt hideout", async ({ page }) => {

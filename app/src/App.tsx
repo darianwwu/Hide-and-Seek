@@ -1,7 +1,8 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Circle, CircleMarker, MapContainer, Pane, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Marker, Pane, Polygon, Polyline, Popup, ScaleControl, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import L from "leaflet";
 import { getActiveCity, CITIES, CITY_STORAGE_KEY } from "./data/cities";
 import type {
   Position,
@@ -31,7 +32,7 @@ function switchCity(id: string): void {
 }
 
 type Role = "landing" | "hider" | "seeker";
-type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT" | "MATCH_POI" | "MATCH_BUSLINE" | "MATCH_STREET" | "MEASURE";
+type QuestionType = "RADAR" | "THERMO_PATH" | "MATCH_DISTRICT" | "MATCH_POI" | "MATCH_BUSLINE" | "MEASURE";
 type MeasureType = string;
 type MatchLevel = string;
 type RadarPreset = "0.1" | "0.25" | "0.5" | "1" | "2" | "custom";
@@ -290,7 +291,10 @@ function encodeQuestionCode(payload: QuestionCode): string {
   if (payload.type === "RADAR") {
     const center = payload.payload.center as [number, number];
     const radiusKm = Number(payload.payload.radiusKm);
-    return `RADAR_${payload.qid}_${formatCoord(center[0])};${formatCoord(center[1])};${formatKmLocale(radiusKm)}km`;
+    // `exact` radars (100 m / 250 m) carry a trailing ;GPS marker; everything
+    // else (500 m / 1 km / 2 km / Custom) is evaluated against the bus stop.
+    const exact = Boolean(payload.payload.exact);
+    return `RADAR_${payload.qid}_${formatCoord(center[0])};${formatCoord(center[1])};${formatKmLocale(radiusKm)}km${exact ? ";GPS" : ""}`;
   }
   if (payload.type === "THERMO_PATH") {
     const start = payload.payload.start as [number, number];
@@ -315,16 +319,11 @@ function encodeQuestionCode(payload: QuestionCode): string {
     const ref = payload.payload.reference as [number, number];
     return `MBUS_${payload.qid}_${lineName}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
   }
-  if (payload.type === "MEASURE") {
-    const measureType = payload.payload.measureType as string;
-    const distKm = Number(payload.payload.distKm);
-    const ref = payload.payload.reference as [number, number];
-    return `MEAS_${payload.qid}_${measureType}_${formatKmLocale(distKm)}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
-  }
-  // MATCH_STREET
-  const street = payload.payload.street as string;
+  // MEASURE
+  const measureType = payload.payload.measureType as string;
+  const distKm = Number(payload.payload.distKm);
   const ref = payload.payload.reference as [number, number];
-  return `MSTR_${payload.qid}_${formatCoord(ref[0])};${formatCoord(ref[1])}_${street}`;
+  return `MEAS_${payload.qid}_${measureType}_${formatKmLocale(distKm)}_${formatCoord(ref[0])};${formatCoord(ref[1])}`;
 }
 
 function encodeAnswerCode(payload: AnswerCode): string {
@@ -343,17 +342,19 @@ function encodeAnswerCode(payload: AnswerCode): string {
   if (payload.type === "MATCH_BUSLINE") {
     return `A_MBUS_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
   }
-  if (payload.type === "MEASURE") {
-    return `A_MEAS_${payload.qid}_${String(payload.answer.result)}`;
-  }
-  return `A_MSTR_${payload.qid}_${payload.answer.match ? "JA" : "NEIN"}`;
+  // MEASURE
+  return `A_MEAS_${payload.qid}_${String(payload.answer.result)}`;
 }
 
 function decodeCode(raw: string): QuestionCode | AnswerCode {
-  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:[.,]\d+)?)km$/i);
+  const radarQ = raw.match(/^RADAR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?);(\d+(?:[.,]\d+)?)km(;GPS)?$/i);
   if (radarQ) {
     const center = parseCoordPair(radarQ[2]);
-    return { qid: radarQ[1].toUpperCase(), type: "RADAR", payload: { center, radiusKm: parseLocaleNumber(radarQ[3]) } };
+    return {
+      qid: radarQ[1].toUpperCase(),
+      type: "RADAR",
+      payload: { center, radiusKm: parseLocaleNumber(radarQ[3]), exact: Boolean(radarQ[4]) },
+    };
   }
 
   const thermoQ = raw.match(/^THERMO_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)(?:_(\d+(?:[.,]\d+)?)km)?$/i);
@@ -425,20 +426,6 @@ function decodeCode(raw: string): QuestionCode | AnswerCode {
     return { qid: mbusA[1].toUpperCase(), type: "MATCH_BUSLINE", answer: { match: mbusA[2].toUpperCase() === "JA" } };
   }
 
-  const mstrQ = raw.match(/^MSTR_([A-Z0-9]{4})_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)_(.+)$/i);
-  if (mstrQ) {
-    return {
-      qid: mstrQ[1].toUpperCase(),
-      type: "MATCH_STREET",
-      payload: { reference: parseCoordPair(mstrQ[2]), street: mstrQ[3] },
-    };
-  }
-
-  const mstrA = raw.match(/^A_MSTR_([A-Z0-9]{4})_(JA|NEIN)$/i);
-  if (mstrA) {
-    return { qid: mstrA[1].toUpperCase(), type: "MATCH_STREET", answer: { match: mstrA[2].toUpperCase() === "JA" } };
-  }
-
   const measQ = raw.match(/^MEAS_([A-Z0-9]{4})_([a-z_]+)_(\d+(?:[.,]\d+)?)_(-?\d+(?:\.\d+)?;-?\d+(?:\.\d+)?)$/i);
   if (measQ) {
     return {
@@ -480,14 +467,6 @@ function findNearestBusLines(pos: Position, busLines: BusLineCollection): { name
   if (results.length === 0) return [];
   const threshold = results[0].dist + 0.05;
   return results.filter((r) => r.dist <= threshold);
-}
-
-async function reverseGeocodeStreet(pos: Position): Promise<string | null> {
-  const url = `https://nominatim.openstreetmap.org/reverse?lat=${pos.lat}&lon=${pos.lon}&format=json&zoom=17`;
-  const res = await fetch(url, { headers: { "Accept-Language": "de" } });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data?.address?.road ?? data?.address?.pedestrian ?? data?.address?.footway ?? data?.address?.path ?? null;
 }
 
 function findNearestPoi(pos: Position, features: PoiFeature[]): { name: string; dist: number } | null {
@@ -679,7 +658,6 @@ const ANSWER_TYPE_COST: Record<string, number> = {
   MATCH_DISTRICT: 2,
   MATCH_POI: 3,
   MATCH_BUSLINE: 4,
-  MATCH_STREET: 5,
   MEASURE: 6,
 };
 
@@ -800,6 +778,140 @@ function MapClickResolver({
   return null;
 }
 
+// Distance (in metres) that the bottom-left scale bar currently represents.
+// Mirrors Leaflet's ScaleControl: it measures the ground distance across the
+// first `maxWidth` (=100px) of the map and rounds it down to a "nice" number.
+function scaleRoundMeters(map: L.Map): number {
+  const y = Math.round(map.getSize().y / 2);
+  const maxWidth = 100; // matches Leaflet ScaleControl default
+  const left = map.containerPointToLatLng([0, y]);
+  const right = map.containerPointToLatLng([maxWidth, y]);
+  const maxMeters = left.distanceTo(right);
+  if (!Number.isFinite(maxMeters) || maxMeters <= 0) return 0;
+  const pow10 = Math.pow(10, String(Math.floor(maxMeters)).length - 1);
+  let d = maxMeters / pow10;
+  d = d >= 10 ? 10 : d >= 5 ? 5 : d >= 3 ? 3 : d >= 2 ? 2 : 1;
+  return pow10 * d;
+}
+
+// Clustering turns off once the scale bar shows 500 m or less (i.e. zoomed in
+// far enough). Above that the markers are grid-clustered.
+const CLUSTER_MAX_SCALE_M = 500;
+const CLUSTER_CELL_PX = 70;
+
+type StopMarkerHandlers = {
+  role: Role;
+  onStopClick: () => void;
+  onPopupOpen: (id: string) => void;
+  onPopupClose: () => void;
+  onSelectHideout: (id: string) => void;
+};
+
+function StopCircleMarker({ stop, handlers }: { stop: StopLike; handlers: StopMarkerHandlers }) {
+  return (
+    <CircleMarker
+      center={[stop.lat, stop.lon]}
+      radius={6}
+      pathOptions={{ color: "#7f1d1d", weight: 1.4, fillColor: "#dc2626", fillOpacity: 0.9 }}
+      eventHandlers={{
+        click: handlers.onStopClick,
+        popupopen: () => handlers.onPopupOpen(stop.id),
+        popupclose: handlers.onPopupClose,
+      }}
+    >
+      <Popup>
+        <b>{stop.name}</b>
+        {handlers.role === "hider" && (
+          <>
+            <br />
+            <button
+              className="btn"
+              style={{ marginTop: 8, width: "100%" }}
+              onClick={() => handlers.onSelectHideout(stop.id)}
+            >
+              Als Versteck auswählen
+            </button>
+          </>
+        )}
+      </Popup>
+    </CircleMarker>
+  );
+}
+
+type ClusterGroup = { lat: number; lon: number; stops: StopLike[] };
+
+function ClusteredStops({ stops, handlers }: { stops: StopLike[]; handlers: StopMarkerHandlers }) {
+  const [tick, setTick] = useState(0);
+  const map = useMapEvents({
+    zoomend: () => setTick((t) => t + 1),
+    moveend: () => setTick((t) => t + 1),
+  });
+
+  const { singles, clusters } = useMemo(() => {
+    void tick; // recompute whenever the map view changes
+    const clusteringOn = scaleRoundMeters(map) > CLUSTER_MAX_SCALE_M;
+    if (!clusteringOn) {
+      return { singles: stops, clusters: [] as ClusterGroup[] };
+    }
+    const zoom = map.getZoom();
+    const cells = new Map<string, StopLike[]>();
+    for (const s of stops) {
+      const pt = map.project([s.lat, s.lon], zoom);
+      const key = `${Math.floor(pt.x / CLUSTER_CELL_PX)}:${Math.floor(pt.y / CLUSTER_CELL_PX)}`;
+      const bucket = cells.get(key);
+      if (bucket) bucket.push(s);
+      else cells.set(key, [s]);
+    }
+    const singlesOut: StopLike[] = [];
+    const clustersOut: ClusterGroup[] = [];
+    for (const bucket of cells.values()) {
+      if (bucket.length === 1) {
+        singlesOut.push(bucket[0]);
+        continue;
+      }
+      let sumLat = 0;
+      let sumLon = 0;
+      for (const s of bucket) {
+        sumLat += s.lat;
+        sumLon += s.lon;
+      }
+      clustersOut.push({ lat: sumLat / bucket.length, lon: sumLon / bucket.length, stops: bucket });
+    }
+    return { singles: singlesOut, clusters: clustersOut };
+  }, [stops, map, tick]);
+
+  return (
+    <>
+      {singles.map((stop) => (
+        <StopCircleMarker key={stop.id} stop={stop} handlers={handlers} />
+      ))}
+      {clusters.map((c) => {
+        const count = c.stops.length;
+        const size = count < 10 ? 34 : count < 100 ? 40 : 48;
+        const icon = L.divIcon({
+          html: `<div class="cluster-marker" style="width:${size}px;height:${size}px"><span>${count}</span></div>`,
+          className: "cluster-marker-wrap",
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2],
+        });
+        return (
+          <Marker
+            key={`cluster-${c.lat.toFixed(5)}-${c.lon.toFixed(5)}-${count}`}
+            position={[c.lat, c.lon]}
+            icon={icon}
+            eventHandlers={{
+              click: () => {
+                const bounds = L.latLngBounds(c.stops.map((s) => [s.lat, s.lon] as [number, number]));
+                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
+              },
+            }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
 function copyText(value: string): void {
   navigator.clipboard.writeText(value).catch(() => {
     // ignore on unsupported clipboard
@@ -826,7 +938,6 @@ function renderType(type: QuestionType): string {
   if (type === "THERMO_PATH") return "Thermometer";
   if (type === "MATCH_POI") return "POI-Matching";
   if (type === "MATCH_BUSLINE") return "Buslinien-Matching";
-  if (type === "MATCH_STREET") return "Straßen-Matching";
   if (type === "MEASURE") return "Measuring";
   return "Matching Frage";
 }
@@ -860,7 +971,6 @@ const QUESTION_CATEGORIES: { group: string; reward: string; time: string; items:
   { group: "Matching", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
     ...CITY.districtLevels.map((l) => ({ subKey: `MATCH_DISTRICT_${l.id}`, label: l.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
     ...CITY.poiLayers.map((l) => ({ subKey: `MATCH_POI_${l.id}`, label: l.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
-    { subKey: "MATCH_STREET", label: "Straße", reward: "3 Karten ziehen, 1 behalten", time: "3 min" },
   ]},
   { group: "Measuring", reward: "3 Karten ziehen, 1 behalten", time: "3 min", items: [
     ...MEASURE_TYPES.map((m) => ({ subKey: `MEASURE_${m.id}`, label: m.label, reward: "3 Karten ziehen, 1 behalten", time: "3 min" })),
@@ -902,7 +1012,7 @@ function questionSubKey(type: QuestionType, payload: Record<string, unknown>): s
 function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
   function rewardFor(type: QuestionType): { reward: string; time: string } {
     if (type === "RADAR" || type === "THERMO_PATH") return { reward: "2 Karten ziehen, 1 behalten", time: "3 min" };
-    if (type === "MATCH_DISTRICT" || type === "MATCH_POI" || type === "MATCH_BUSLINE" || type === "MATCH_STREET") return { reward: "3 Karten ziehen, 1 behalten", time: "3 min" };
+    if (type === "MATCH_DISTRICT" || type === "MATCH_POI" || type === "MATCH_BUSLINE") return { reward: "3 Karten ziehen, 1 behalten", time: "3 min" };
     if (type === "MEASURE") return { reward: "3 Karten ziehen, 1 behalten", time: "3 min" };
     return { reward: "", time: "" };
   }
@@ -910,8 +1020,9 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
   if (decoded.type === "RADAR") {
     const radiusKm = Number(decoded.payload.radiusKm);
     const meters = Math.round(radiusKm * 1000);
-    if (radiusKm <= 0.5) {
-      // 100 m / 250 m / 500 m: hider's exact GPS position is evaluated, not the bus stop
+    const exact = Boolean(decoded.payload.exact);
+    if (exact) {
+      // 100 m / 250 m: hider's exact GPS position is evaluated, not the bus stop
       return {
         text: `Bist du im Umkreis von ${meters} Metern von uns?`,
         note: "⚠️ Verstecker: dein exakter GPS-Standort wird geprüft – nicht die gewählte Haltestelle.",
@@ -920,7 +1031,13 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
         doubled: false,
       };
     }
-    return { text: `Bist du im Umkreis von ${meters} Metern von uns?`, reward, time, doubled: false };
+    return {
+      text: `Bist du im Umkreis von ${meters} Metern von uns?`,
+      note: "Verstecker: deine gewählte Haltestelle wird geprüft.",
+      reward,
+      time,
+      doubled: false,
+    };
   }
   if (decoded.type === "THERMO_PATH") {
     const start = decoded.payload.start as [number, number];
@@ -943,10 +1060,6 @@ function translateQuestionCode(decoded: QuestionCode): QuestionPreview {
   if (decoded.type === "MATCH_BUSLINE") {
     const line = decoded.payload.lineName as string;
     return { text: `Ist unsere nächste Buslinie (Linie ${line}) auch deine nächste Buslinie?`, reward, time, doubled: false };
-  }
-  if (decoded.type === "MATCH_STREET") {
-    const street = decoded.payload.street as string;
-    return { text: `Sind wir auf der gleichen Straße? (Unsere Straße: ${street})`, reward, time, doubled: false };
   }
   if (decoded.type === "MEASURE") {
     const mt = decoded.payload.measureType as MeasureType;
@@ -1010,6 +1123,7 @@ function App() {
   const selectedMeasureType: MeasureType = MEASURE_TYPES[0]?.id ?? "";
   const [usedFotoQuestions, setUsedFotoQuestions] = useState<Record<string, number>>(() => lsGet("hs_usedFoto", {}));
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
+  const [buslineConfirm, setBuslineConfirm] = useState<string | null>(null);
   const [questionCategoryOpen, setQuestionCategoryOpen] = useState<Record<string, boolean>>({
     radar: true,
     thermo: true,
@@ -1211,6 +1325,23 @@ function App() {
     });
   }, [activeAnswers, askedCodes, geojson, poiData, busLines]);
 
+  // Only the exact (100 m / 250 m) radars are drawn as a concrete area on the
+  // seeker's map. JA → the hider is inside the circle; NEIN → not inside it.
+  // Larger radars only prune bus stops and draw nothing.
+  const radarAreas = useMemo(() => {
+    const out: { center: [number, number]; radiusKm: number; inside: boolean }[] = [];
+    for (const a of Object.values(appliedAnswers)) {
+      const q = askedCodes[a.qid];
+      if (!q || q.type !== "RADAR" || !q.payload.exact) continue;
+      out.push({
+        center: q.payload.center as [number, number],
+        radiusKm: Number(q.payload.radiusKm),
+        inside: Boolean(a.answer.inside),
+      });
+    }
+    return out;
+  }, [appliedAnswers, askedCodes]);
+
   type GenOpts = { level?: MatchLevel; poiType?: string; lineName?: string; measureType?: MeasureType };
   async function generateQuestion(type: QuestionType, opts?: GenOpts): Promise<void> {
     if (!currentPos) return;
@@ -1221,6 +1352,8 @@ function App() {
       payload = {
         center: [currentPos.lat, currentPos.lon],
         radiusKm: radarKm,
+        // Only the 100 m and 250 m presets probe the hider's exact GPS position.
+        exact: radarPreset === "0.1" || radarPreset === "0.25",
       };
     }
 
@@ -1271,19 +1404,6 @@ function App() {
       payload = {
         lineName,
         reference: [currentPos.lat, currentPos.lon],
-      };
-    }
-
-    if (type === "MATCH_STREET") {
-      setAnswerFeedback("Straße wird ermittelt...");
-      const street = await reverseGeocodeStreet(currentPos);
-      if (!street) {
-        setAnswerFeedback("Straße konnte nicht ermittelt werden.");
-        return;
-      }
-      payload = {
-        reference: [currentPos.lat, currentPos.lon],
-        street,
       };
     }
 
@@ -1364,16 +1484,16 @@ function App() {
       if (decoded.type === "RADAR") {
         const center = decoded.payload.center as [number, number];
         const radiusKm = Number(decoded.payload.radiusKm);
-        // 100 m / 250 m / 500 m: use the hider's exact GPS position, not the bus stop
-        const useExactPos = radiusKm <= 0.5;
+        // 100 m / 250 m: use the hider's exact GPS position, not the bus stop
+        const useExactPos = Boolean(decoded.payload.exact);
         if (useExactPos && !currentPos) {
-          setHiderFeedback("Für kurze Radien (≤500 m) wird dein exakter GPS-Standort benötigt. GPS nicht verfügbar.");
+          setHiderFeedback("Für den 100 m / 250 m Radar wird dein exakter GPS-Standort benötigt. GPS nicht verfügbar.");
           return;
         }
         const posForRadar = useExactPos ? currentPos! : realPos;
         const inside = haversineKm(posForRadar, { lat: center[0], lon: center[1] }) <= radiusKm;
         answer = { inside };
-        const posLabel = useExactPos ? "exakter GPS-Standort" : "Haltestelle";
+        const posLabel = useExactPos ? "exakter GPS-Standort" : "gewählte Haltestelle";
         feedback = inside ? `Radar: JA, im Umkreis. (${posLabel})` : `Radar: NEIN, außerhalb. (${posLabel})`;
       }
 
@@ -1429,17 +1549,6 @@ function App() {
         feedback = match
           ? `Buslinien-Matching: JA – Linie ${seekerLine} gehört zu deinen nächsten (${lineNames.join(", ")})`
           : `Buslinien-Matching: NEIN – deine nächsten: ${lineNames.join(", ") || "keine"}, Sucher: ${seekerLine}`;
-      }
-
-      if (decoded.type === "MATCH_STREET") {
-        setHiderFeedback("Straße wird ermittelt...");
-        const seekerStreet = decoded.payload.street as string;
-        const hiderStreet = await reverseGeocodeStreet(realPos);
-        const match = Boolean(hiderStreet && hiderStreet === seekerStreet);
-        answer = { match };
-        feedback = match
-          ? `Straßen-Matching: JA – gleiche Straße (${seekerStreet})`
-          : `Straßen-Matching: NEIN – deine Straße: ${hiderStreet ?? "?"}, Sucher: ${seekerStreet}`;
       }
 
       if (decoded.type === "MEASURE") {
@@ -1847,6 +1956,8 @@ function App() {
 
             {role === "seeker" && (
               <>
+                <h2>Sucher</h2>
+                <p className="meta">Stelle Fragen und wende die Antworten des Versteckers an.</p>
                 <div className="row" ref={questionCodeRowRef}>
                   <textarea readOnly value={latestQuestionCode} />
                   <button className="btn ghost" onClick={() => copyText(latestQuestionCode)}>
@@ -1895,9 +2006,13 @@ function App() {
                       placeholder="z. B. 0,2"
                     />
                   )}
-                  {(radarPreset === "0.1" || radarPreset === "0.25" || radarPreset === "0.5") && (
+                  {radarPreset === "0.1" || radarPreset === "0.25" ? (
                     <p className="meta small" style={{ color: "#b45309", marginTop: 4 }}>
-                      ⚠️ 100 m / 250 m / 500 m: Verstecker wertet seinen <strong>exakten GPS-Standort</strong> aus – nicht die gewählte Haltestelle.
+                      ⚠️ 100 m / 250 m: Verstecker wertet seinen <strong>exakten GPS-Standort</strong> aus – nicht die gewählte Haltestelle. Der erlaubte Bereich wird auf der Karte eingezeichnet.
+                    </p>
+                  ) : (
+                    <p className="meta small" style={{ marginTop: 4 }}>
+                      Ab 500 m &amp; Custom: Es wird die <strong>gewählte Haltestelle</strong> des Versteckers geprüft; auf der Karte werden nur unmögliche Haltestellen ausgeblendet.
                     </p>
                   )}
                   <p className="meta small">Aktiv: {formatKmLocale(radarKm)} km</p>
@@ -1950,7 +2065,6 @@ function App() {
                     {CITY.poiLayers.map((l) => (
                       <button key={l.id} className={`q-btn${qBtnCls(`MATCH_POI_${l.id}`, usedSubKeys)}`} onClick={() => generateQuestion("MATCH_POI", { poiType: l.id })}>{l.label}</button>
                     ))}
-                    <button className={`q-btn${qBtnCls("MATCH_STREET", usedSubKeys)}`} onClick={() => generateQuestion("MATCH_STREET")}>Straße</button>
                   </div>
                   <div className="q-busline-row">
                     <select value={selectedBusLine} onChange={(e) => setSelectedBusLine(e.target.value)}>
@@ -1959,7 +2073,10 @@ function App() {
                         <option key={f.properties.route_id} value={f.properties.name}>Linie {f.properties.name}</option>
                       ))}
                     </select>
-                    <button className={`q-btn${selectedBusLine ? qBtnCls(`MATCH_BUSLINE_${selectedBusLine}`, usedSubKeys) : ""}`} onClick={() => generateQuestion("MATCH_BUSLINE")}>Buslinie →</button>
+                    <button className={`q-btn${selectedBusLine ? qBtnCls(`MATCH_BUSLINE_${selectedBusLine}`, usedSubKeys) : ""}`} onClick={() => {
+                      if (!selectedBusLine) { setAnswerFeedback("Bitte eine Buslinie auswählen."); return; }
+                      setBuslineConfirm(selectedBusLine);
+                    }}>Buslinie →</button>
                   </div>
                 </CategoryCard>
 
@@ -2017,6 +2134,29 @@ function App() {
                     </div>
                   );
                 })()}
+
+                {buslineConfirm !== null && (
+                  <div className="question-preview-overlay" onClick={() => setBuslineConfirm(null)}>
+                    <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
+                      <p className="question-preview-text">Buslinien-Frage stellen: <strong>Linie {buslineConfirm}</strong>?</p>
+                      <p className="meta small" style={{ margin: "0 0 8px", color: "#b45309" }}>
+                        ⚠️ Hinweis: Diese Frage darfst du nur stellen, wenn ihr euch gerade in einem Bus oder einer Straßenbahn der Linie {buslineConfirm} befindet.
+                      </p>
+                      <div className="question-preview-meta">
+                        <span>🎴 3 Karten ziehen, 1 behalten</span>
+                        <span>⏱️ 3 min</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn" style={{ flex: 1 }} onClick={() => {
+                          const line = buslineConfirm;
+                          setBuslineConfirm(null);
+                          generateQuestion("MATCH_BUSLINE", { lineName: line });
+                        }}>Ja, stellen</button>
+                        <button className="btn ghost" style={{ flex: 1 }} onClick={() => setBuslineConfirm(null)}>Abbrechen</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
               </>
             )}
@@ -2094,45 +2234,37 @@ function App() {
                         />
                       </Pane>
                     )}
-                    {stopsToShow.map((stop) => {
-                      return (
-                        <CircleMarker
-                          key={stop.id}
-                          center={[stop.lat, stop.lon]}
-                          radius={6}
-                          pathOptions={{
-                            color: "#7f1d1d",
-                            weight: 1.4,
-                            fillColor: "#dc2626",
-                            fillOpacity: 0.9,
-                          }}
-                          eventHandlers={{
-                            click: () => setMapClickPopup(null),
-                            popupopen: () => setPreviewStopId(stop.id),
-                            popupclose: () => setPreviewStopId(null),
-                          }}
-                        >
-                          <Popup>
-                            <b>{stop.name}</b>
-                            {role === "hider" && (
-                              <>
-                                <br />
-                                <button
-                                  className="btn"
-                                  style={{ marginTop: 8, width: "100%" }}
-                                  onClick={() => setConfirmStopId(stop.id)}
-                                >
-                                  Als Versteck auswählen
-                                </button>
-                              </>
-                            )}
-                          </Popup>
-                        </CircleMarker>
-                      );
-                    })}
+                    <ClusteredStops
+                      stops={stopsToShow}
+                      handlers={{
+                        role,
+                        onStopClick: () => setMapClickPopup(null),
+                        onPopupOpen: (id) => setPreviewStopId(id),
+                        onPopupClose: () => setPreviewStopId(null),
+                        onSelectHideout: (id) => setConfirmStopId(id),
+                      }}
+                    />
                   </>
                 );
               })()}
+
+              {role === "seeker" && radarAreas.length > 0 && (
+                <Pane name="radarAreas" style={{ zIndex: 330 }}>
+                  {radarAreas.map((r, i) => (
+                    <Circle
+                      key={`radar-${i}`}
+                      center={[r.center[0], r.center[1]]}
+                      radius={r.radiusKm * 1000}
+                      pathOptions={
+                        r.inside
+                          ? { color: "#1d4ed8", weight: 2, fillColor: "#3b82f6", fillOpacity: 0.18 }
+                          : { color: "#b91c1c", weight: 2, dashArray: "6 6", fillColor: "#ef4444", fillOpacity: 0.12 }
+                      }
+                      interactive={false}
+                    />
+                  ))}
+                </Pane>
+              )}
 
               <Pane name="districtBorders" style={{ zIndex: 320 }}>
                 {CITY.districtLevels.map((lvl) =>
