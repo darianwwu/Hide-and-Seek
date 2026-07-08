@@ -21,6 +21,15 @@ async function selectRole(page: Page, role: "hider" | "seeker") {
   await page.getByRole("button", { name: role === "hider" ? "Verstecker" : "Sucher", exact: true }).click();
 }
 
+// Question categories are collapsed by default; select Sucher and expand them all.
+async function gotoSeeker(page: Page) {
+  await page.getByRole("button", { name: "Sucher", exact: true }).click();
+  for (const cat of ["radar", "thermo", "matching", "measuring", "foto"]) {
+    const toggle = page.locator(`[data-cat='${cat}'] .category-toggle`);
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  }
+}
+
 test.describe("Erfurt city", () => {
   test("landing shows the city picker", async ({ page }) => {
     await erfurtStart(page);
@@ -31,7 +40,7 @@ test.describe("Erfurt city", () => {
 
   test("matching card uses a single Ortsteil level (no Bezirk/Stadtbezirk)", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='matching']");
     await expect(card.getByRole("button", { name: "Ortsteil", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Bezirk", exact: true })).toHaveCount(0);
@@ -40,7 +49,7 @@ test.describe("Erfurt city", () => {
 
   test("Ortsteil match code uses the Erfurt code letter O", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Ortsteil", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MATCH_[A-Z0-9]{4}_O_\d+\.\d+;\d+\.\d+$/);
@@ -48,7 +57,7 @@ test.describe("Erfurt city", () => {
 
   test("measuring card has Ortsteilgrenze", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(
       page.locator("[data-cat='measuring']").getByRole("button", { name: "Ortsteilgrenze", exact: true }),
     ).toBeVisible();
@@ -56,7 +65,7 @@ test.describe("Erfurt city", () => {
 
   test("radar code is centered in Erfurt", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     const m = code.match(/^RADAR_[A-Z0-9]{4}_(\d+\.\d+);(\d+\.\d+);/);
@@ -69,7 +78,7 @@ test.describe("Erfurt city", () => {
 
   test("map renders Erfurt stops", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 15_000 });
     // Wait for a stop marker that has actually been projected (not the momentary
     // "M0 0" degenerate path Leaflet emits before the view settles).
@@ -82,7 +91,7 @@ test.describe("Erfurt city", () => {
 
   test("POI categories: Tankstelle + Apotheke added, Krankenhaus removed", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const matching = page.locator("[data-cat='matching']");
     await expect(matching.getByRole("button", { name: "Tankstelle", exact: true })).toBeVisible();
     await expect(matching.getByRole("button", { name: "Apotheke", exact: true })).toBeVisible();
@@ -91,7 +100,7 @@ test.describe("Erfurt city", () => {
 
   test("KiKA-Figur POI category appears in Matching and Measuring", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(
       page.locator("[data-cat='matching']").getByRole("button", { name: "KiKA-Figur", exact: true }),
     ).toBeVisible();
@@ -102,7 +111,7 @@ test.describe("Erfurt city", () => {
 
   test("KiKA-Figur match generates an MPOI_..._kika code", async ({ page }) => {
     await erfurtStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 15_000 });
     await page.locator("[data-cat='matching']").getByRole("button", { name: "KiKA-Figur", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();

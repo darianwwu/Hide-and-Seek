@@ -143,34 +143,50 @@ function escapeRegex(s: string): string {
 const qBtn = (scope: ReturnType<Page["locator"]>, label: string) =>
   scope.locator(".q-btn").filter({ hasText: new RegExp(`^${escapeRegex(label)}$`) });
 
+// Question categories are collapsed by default; open one before touching its
+// contents. Idempotent (skips a toggle that is already expanded).
+async function openCat(seeker: Page, catId: string) {
+  const toggle = seeker.locator(`[data-cat='${catId}'] .category-toggle`);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click(CLICK);
+}
+
 function radar(seeker: Page, preset: "100 m" | "250 m" | "500 m" | "1 km" | "2 km" | "Custom", customKm?: string) {
   return async () => {
     const card = seeker.locator("[data-cat='radar']");
+    await openCat(seeker, "radar");
     await qBtn(card, preset).click(CLICK);
     if (customKm !== undefined) await card.getByPlaceholder("z. B. 0,2").fill(customKm, CLICK);
     await card.getByRole("button", { name: "Radar-Code erzeugen" }).click(CLICK);
   };
 }
 
-const matching = (seeker: Page, label: string) => () =>
-  qBtn(seeker.locator("[data-cat='matching']"), label).click(CLICK);
+const matching = (seeker: Page, label: string) => async () => {
+  await openCat(seeker, "matching");
+  await qBtn(seeker.locator("[data-cat='matching']"), label).click(CLICK);
+};
 
-const measuring = (seeker: Page, label: string) => () =>
-  qBtn(seeker.locator("[data-cat='measuring']"), label).click(CLICK);
+const measuring = (seeker: Page, label: string) => async () => {
+  await openCat(seeker, "measuring");
+  await qBtn(seeker.locator("[data-cat='measuring']"), label).click(CLICK);
+};
 
 const busline = (seeker: Page, line: string) => async () => {
+  await openCat(seeker, "matching");
   await seeker.locator("[data-cat='matching'] select").selectOption(line, CLICK);
   await qBtn(seeker.locator("[data-cat='matching']"), "Buslinie →").click(CLICK);
   await seeker.getByRole("button", { name: "Ja, stellen" }).click(CLICK);
 };
 
-const thermoGenerate = (seeker: Page) => () =>
-  seeker.locator("[data-cat='thermo']").getByRole("button", { name: "Thermometer-Code erzeugen" }).click(CLICK);
+const thermoGenerate = (seeker: Page) => async () => {
+  await openCat(seeker, "thermo");
+  await seeker.locator("[data-cat='thermo']").getByRole("button", { name: "Thermometer-Code erzeugen" }).click(CLICK);
+};
 
 // Walk the seeker along `waypoints` until the thermometer target is reached.
 async function walkThermo(seeker: Phone, start: [number, number], waypoints: [number, number][]) {
   await seeker.setGps(start[0], start[1]);
   const card = seeker.page.locator("[data-cat='thermo']");
+  await openCat(seeker.page, "thermo");
   // retry Start until the displayed start point is the fresh GPS position
   await expect
     .poll(async () => {
@@ -623,6 +639,7 @@ test("SIM D: edge cases at Urbicher Kreuz (exact GPS rule, SAME thermo, bad code
     // leaves exactly the one true stop on the map.
     await seekerP.setGps(50.95276, 11.09317);
     // selecting the 250 m preset surfaces the seeker-side exact-GPS warning
+    await openCat(seeker, "radar");
     await qBtn(seeker.locator("[data-cat='radar']"), "250 m").click();
     await expect(seeker.getByText(/exakten GPS-Standort/).first()).toBeVisible();
     await playRound({

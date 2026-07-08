@@ -248,11 +248,11 @@ function CategoryCard({
   return (
     <div className="card question-category" data-cat={id}>
       <button type="button" className="category-toggle" onClick={onToggle} aria-expanded={open}>
+        <span className="poi-menu-arrow">{open ? "▾" : "▸"}</span>
         <span>
           <span className="category-title">{title}</span>
           <span className="meta small">{meta}</span>
         </span>
-        <span className="poi-menu-arrow">{open ? "▾" : "▸"}</span>
       </button>
       {open && <div className="category-body">{children}</div>}
     </div>
@@ -1191,11 +1191,11 @@ function App() {
   const [fotoConfirmQuestion, setFotoConfirmQuestion] = useState<string | null>(null);
   const [buslineConfirm, setBuslineConfirm] = useState<string | null>(null);
   const [questionCategoryOpen, setQuestionCategoryOpen] = useState<Record<string, boolean>>({
-    radar: true,
-    thermo: true,
-    matching: true,
-    measuring: true,
-    foto: true,
+    radar: false,
+    thermo: false,
+    matching: false,
+    measuring: false,
+    foto: false,
   });
 
   const [askedCodes, setAskedCodes] = useState<Record<string, QuestionCode>>(() => lsGet("hs_askedCodes", {}));
@@ -1208,6 +1208,7 @@ function App() {
   }, [latestQuestionCode]);
   const [answerInput, setAnswerInput] = useState("");
   const [answerFeedback, setAnswerFeedback] = useState("");
+  const [questionFeedback, setQuestionFeedback] = useState("");
   const [appliedAnswers, setAppliedAnswers] = useState<Record<string, AnswerCode>>(() => lsGet("hs_appliedAnswers", {}));
 
   const usedSubKeys = useMemo(
@@ -1315,7 +1316,7 @@ function App() {
       setThermoEnd(currentPos);
       setThermoTracking((prev) => ({ ...prev, active: false, walkedKm: nextWalked, lastPos: currentPos }));
       const doneMsg = `Ziel erreicht: ${thermoTracking.targetKm.toFixed(2)} km gelaufen. Endpunkt wurde gesetzt.`;
-      setAnswerFeedback(doneMsg);
+      setQuestionFeedback(doneMsg);
       notifySeeker(doneMsg);
       return;
     }
@@ -1425,7 +1426,7 @@ function App() {
 
     if (type === "THERMO_PATH") {
       if (!thermoStart || !thermoEnd) {
-        setAnswerFeedback("Bitte zuerst Start- und Endpunkt setzen.");
+        setQuestionFeedback("Bitte zuerst Start- und Endpunkt setzen.");
         return;
       }
       payload = {
@@ -1446,12 +1447,12 @@ function App() {
       const poiType = opts?.poiType ?? selectedPoiType;
       const layerData = poiData[poiType];
       if (!layerData) {
-        setAnswerFeedback("POI-Daten noch nicht geladen.");
+        setQuestionFeedback("POI-Daten noch nicht geladen.");
         return;
       }
       const nearest = findNearestPoi(currentPos, layerData.features);
       if (!nearest) {
-        setAnswerFeedback("Keine POIs gefunden.");
+        setQuestionFeedback("Keine POIs gefunden.");
         return;
       }
       payload = {
@@ -1464,7 +1465,7 @@ function App() {
     if (type === "MATCH_BUSLINE") {
       const lineName = opts?.lineName ?? selectedBusLine;
       if (!lineName) {
-        setAnswerFeedback("Bitte eine Buslinie auswählen.");
+        setQuestionFeedback("Bitte eine Buslinie auswählen.");
         return;
       }
       payload = {
@@ -1479,17 +1480,17 @@ function App() {
 
       if (mt.startsWith("border_")) {
         distKm = distToNearestBorder(currentPos, geojson);
-        if (!Number.isFinite(distKm)) { setAnswerFeedback("Grenzabstand konnte nicht berechnet werden."); return; }
+        if (!Number.isFinite(distKm)) { setQuestionFeedback("Grenzabstand konnte nicht berechnet werden."); return; }
       } else {
         // POI type
         const layerData = poiData[mt];
-        if (!layerData) { setAnswerFeedback("POI-Daten noch nicht geladen."); return; }
+        if (!layerData) { setQuestionFeedback("POI-Daten noch nicht geladen."); return; }
         const nearest = findNearestPoi(currentPos, layerData.features);
-        if (!nearest) { setAnswerFeedback("Keine POIs gefunden."); return; }
+        if (!nearest) { setQuestionFeedback("Keine POIs gefunden."); return; }
         distKm = nearest.dist;
       }
 
-      if (distKm === null) { setAnswerFeedback("Abstand konnte nicht berechnet werden."); return; }
+      if (distKm === null) { setQuestionFeedback("Abstand konnte nicht berechnet werden."); return; }
       payload = {
         measureType: mt,
         distKm,
@@ -1506,12 +1507,12 @@ function App() {
     setAskedCodes((prev) => ({ ...prev, [question.qid]: question }));
     const code = encodeQuestionCode(question);
     setLatestQuestionCode(code);
-    setAnswerFeedback(`${renderType(type)}-Code erstellt.`);
+    setQuestionFeedback(`${renderType(type)}-Code erstellt.`);
   }
 
   function startThermometer(targetKm: number): void {
     if (!currentPos) {
-      setAnswerFeedback("Aktueller Standort fehlt. Bitte GPS freigeben.");
+      setQuestionFeedback("Aktueller Standort fehlt. Bitte GPS freigeben.");
       return;
     }
     setThermoStart(currentPos);
@@ -1522,7 +1523,7 @@ function App() {
       walkedKm: 0,
       lastPos: currentPos,
     });
-    setAnswerFeedback(`Thermometer gestartet: laufe ${targetKm.toFixed(2)} km.`);
+    setQuestionFeedback(`Thermometer gestartet: laufe ${targetKm.toFixed(2)} km.`);
   }
 
   function resetThermometer(): void {
@@ -1686,11 +1687,11 @@ function App() {
   const visibleDistrictLevel = CITY.districtLevels.find((lvl) => borderVisible[lvl.id])?.id ?? null;
 
   function isQuestionCategoryOpen(id: string): boolean {
-    return questionCategoryOpen[id] ?? true;
+    return questionCategoryOpen[id] ?? false;
   }
 
   function toggleQuestionCategory(id: string): void {
-    setQuestionCategoryOpen((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
+    setQuestionCategoryOpen((prev) => ({ ...prev, [id]: !(prev[id] ?? false) }));
   }
 
   const mapLayerControls = (
@@ -1856,6 +1857,7 @@ function App() {
                     setHiderAnswerCode("");
                     setAnswerInput("");
                     setAnswerFeedback("");
+                    setQuestionFeedback("");
                     setShowResetConfirm(false);
                   }}>Ja, zurücksetzen</button>
                   <button className="btn ghost" style={{ flex: 1 }} onClick={() => setShowResetConfirm(false)}>Abbrechen</button>
@@ -2056,17 +2058,19 @@ function App() {
 
             {role === "seeker" && (
               <>
-                <div className="row" ref={questionCodeRowRef}>
+                <div className="row" ref={questionCodeRowRef} style={{ marginTop: 12 }}>
+                  <label>Fragecode erzeugen</label>
                   <textarea readOnly value={latestQuestionCode} />
-                  <button className="btn ghost" onClick={() => copyText(latestQuestionCode)}>
+                  <button className={latestQuestionCode ? "btn" : "btn ghost"} onClick={() => copyText(latestQuestionCode)}>
                     Rauskopieren
                   </button>
+                  <p className="meta">{questionFeedback}</p>
                 </div>
 
                 <div className="row">
                   <label>Antwortcode eintragen</label>
                   <textarea value={answerInput} onChange={(e) => setAnswerInput(e.target.value)} placeholder="A_RADAR_1A2B_JA" />
-                  <button className="btn" onClick={applyAnswerCode}>
+                  <button className={answerInput ? "btn" : "btn ghost"} onClick={applyAnswerCode}>
                     Antwort anwenden
                   </button>
                   <p className="meta">{answerFeedback}</p>
@@ -2137,7 +2141,7 @@ function App() {
                     <br />
                     Ziel: {thermoEnd ? `${thermoEnd.lat.toFixed(5)}, ${thermoEnd.lon.toFixed(5)}` : "-"}
                     <br />
-                    Status: {thermoTracking.active ? "Laeuft" : "Inaktiv"}
+                    Status: {thermoTracking.active ? "Läuft" : "Inaktiv"}
                     {thermoTracking.active && (
                       <>
                         <br />
@@ -2172,7 +2176,7 @@ function App() {
                       ))}
                     </select>
                     <button className={`q-btn${selectedBusLine ? qBtnCls(`MATCH_BUSLINE_${selectedBusLine}`, usedSubKeys) : ""}`} onClick={() => {
-                      if (!selectedBusLine) { setAnswerFeedback("Bitte eine Buslinie auswählen."); return; }
+                      if (!selectedBusLine) { setQuestionFeedback("Bitte eine Buslinie auswählen."); return; }
                       setBuslineConfirm(selectedBusLine);
                     }}>Buslinie →</button>
                   </div>

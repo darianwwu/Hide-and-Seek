@@ -19,6 +19,21 @@ async function selectRole(page: Page, role: "hider" | "seeker") {
   await page.getByRole("button", { name: role === "hider" ? "Verstecker" : "Sucher", exact: true }).click();
 }
 
+// Question categories are collapsed by default; open them so their contents are
+// clickable. Idempotent (only clicks a toggle that is not already expanded).
+async function openSeekerCategories(page: Page) {
+  for (const cat of ["radar", "thermo", "matching", "measuring", "foto"]) {
+    const toggle = page.locator(`[data-cat='${cat}'] .category-toggle`);
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  }
+}
+
+// Select the Sucher role AND expand all question categories.
+async function gotoSeeker(page: Page) {
+  await page.getByRole("button", { name: "Sucher", exact: true }).click();
+  await openSeekerCategories(page);
+}
+
 async function waitForMap(page: Page) {
   await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 15_000 });
 }
@@ -71,14 +86,14 @@ test.describe("Landing Page", () => {
   test("navigating to seeker shows seeker panel", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(page.getByRole("heading", { name: "Sucher" })).toBeVisible();
   });
 
   test("Zur Startseite button returns to landing", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await expect(page.getByRole("heading", { name: "Rolle auswählen" })).toBeVisible();
   });
@@ -98,7 +113,7 @@ test.describe("Game Reset", () => {
   test("cancel does not clear state", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await page.getByRole("button", { name: "Spiel zurücksetzen" }).click();
     await page.getByRole("button", { name: "Abbrechen" }).click();
@@ -108,7 +123,7 @@ test.describe("Game Reset", () => {
   test("confirming reset clears game data", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
     await page.getByRole("button", { name: "Spiel zurücksetzen" }).click();
     await page.getByRole("button", { name: "Ja, zurücksetzen" }).click();
@@ -128,7 +143,7 @@ test.describe("Persistence", () => {
   test("role is persisted in localStorage", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(page.getByRole("heading", { name: "Sucher" })).toBeVisible();
     const storedRole = await page.evaluate(() => localStorage.getItem("hs_role"));
     expect(storedRole).toBe("seeker");
@@ -141,7 +156,7 @@ test.describe("Map", () => {
   test("map renders with tiles and bus stops", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await expect(page.locator(".leaflet-interactive").first()).toBeVisible();
   });
@@ -149,7 +164,7 @@ test.describe("Map", () => {
   test("scale control is shown", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await expect(page.locator(".leaflet-control-scale")).toBeVisible();
   });
@@ -157,7 +172,7 @@ test.describe("Map", () => {
   test("center button is present", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await expect(page.locator(".map-center-btn")).toBeVisible();
   });
@@ -169,7 +184,7 @@ test.describe("POI Layers Menu", () => {
   test("POI menu toggles open/closed", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const toggle = page.locator(".poi-menu-toggle").first();
     await toggle.click();
     await expect(page.locator(".poi-menu-list").first()).toBeVisible();
@@ -180,7 +195,7 @@ test.describe("POI Layers Menu", () => {
   test("POI menu includes border and busline layers", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator(".poi-menu-toggle").first().click();
     const menuList = page.locator(".poi-menu-list").first();
     await expect(menuList.getByText("Bezirksgrenzen", { exact: true })).toBeVisible();
@@ -512,7 +527,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("all question category cards are visible", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(page.locator("[data-cat='radar']")).toBeVisible();
     await expect(page.locator("[data-cat='thermo']")).toBeVisible();
     await expect(page.locator("[data-cat='matching']")).toBeVisible();
@@ -520,10 +535,23 @@ test.describe("Seeker Panel - UI Structure", () => {
     await expect(page.locator("[data-cat='foto']")).toBeVisible();
   });
 
+  test("question categories are collapsed by default", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await page.getByRole("button", { name: "Sucher", exact: true }).click();
+    for (const cat of ["radar", "thermo", "matching", "measuring", "foto"]) {
+      await expect(page.locator(`[data-cat='${cat}'] .category-toggle`)).toHaveAttribute("aria-expanded", "false");
+    }
+    // Collapsed bodies are not rendered, so their controls are absent.
+    await expect(
+      page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }),
+    ).toHaveCount(0);
+  });
+
   test("radar preset buttons work", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='radar']");
     await card.getByRole("button", { name: "250 m" }).click();
     await expect(card.getByText("Aktiv: 0,25 km")).toBeVisible();
@@ -534,7 +562,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("only 100m/250m presets show the exact-GPS note", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='radar']");
     for (const label of ["100 m", "250 m"]) {
       await card.getByRole("button", { name: label }).click();
@@ -550,7 +578,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("custom radar input appears when Custom selected", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='radar']");
     await card.getByRole("button", { name: "Custom" }).click();
     await expect(card.getByPlaceholder("z. B.")).toBeVisible();
@@ -559,7 +587,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("matching card has all expected buttons", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='matching']");
     await expect(card.getByRole("button", { name: "Bezirk", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Stadtbezirk", exact: true })).toBeVisible();
@@ -570,7 +598,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("measuring card has border and POI buttons", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='measuring']");
     await expect(card.getByRole("button", { name: "Bezirksgrenze", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Stadtbezirksgrenze", exact: true })).toBeVisible();
@@ -580,7 +608,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("foto card has photo question buttons", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='foto']");
     for (const label of ["Baum", "Selfie", "Himmel", "Bushaltestelle"]) {
       await expect(card.locator(".q-btn").filter({ hasText: label })).toBeVisible();
@@ -590,7 +618,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("answer input area exists", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(page.getByPlaceholder("A_RADAR_1A2B_JA")).toBeVisible();
     await expect(page.getByRole("button", { name: "Antwort anwenden" })).toBeVisible();
   });
@@ -598,7 +626,7 @@ test.describe("Seeker Panel - UI Structure", () => {
   test("active filter count shows", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await expect(page.getByText(/0 Antworten aktiv/)).toBeVisible();
   });
 });
@@ -609,7 +637,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("radar code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const codeArea = page.locator("textarea[readonly]").first();
     await expect(codeArea).not.toHaveValue("");
@@ -620,7 +648,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("100m preset generates an exact radar code with ;GPS suffix", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='radar']");
     await card.getByRole("button", { name: "100 m" }).click();
     await card.getByRole("button", { name: "Radar-Code erzeugen" }).click();
@@ -631,7 +659,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("500m preset generates a bus-stop radar code without ;GPS", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='radar']");
     await card.getByRole("button", { name: "500 m" }).click();
     await card.getByRole("button", { name: "Radar-Code erzeugen" }).click();
@@ -643,7 +671,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("Straße matching question is no longer offered", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='matching']");
     await expect(card.getByRole("button", { name: "Straße", exact: true })).toHaveCount(0);
   });
@@ -651,7 +679,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("matching bezirk code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Bezirk", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MATCH_[A-Z0-9]{4}_B_\d+\.\d+;\d+\.\d+$/);
@@ -660,7 +688,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("matching stadtbezirk code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Stadtbezirk", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MATCH_[A-Z0-9]{4}_S_\d+\.\d+;\d+\.\d+$/);
@@ -669,7 +697,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("matching POI kita code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Kita", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MPOI_[A-Z0-9]{4}_kitas_\d+\.\d+;\d+\.\d+_.+$/);
@@ -678,7 +706,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("matching POI schule code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Schule", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MPOI_[A-Z0-9]{4}_schulen_\d+\.\d+;\d+\.\d+_.+$/);
@@ -687,7 +715,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("measuring kita code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='measuring']").getByRole("button", { name: "Kita", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MEAS_[A-Z0-9]{4}_kitas_\d+(?:,\d+)?_\d+\.\d+;\d+\.\d+$/);
@@ -696,7 +724,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("measuring bezirksgrenze code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='measuring']").getByRole("button", { name: "Bezirksgrenze", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MEAS_[A-Z0-9]{4}_border_bezirk_\d+(?:,\d+)?_\d+\.\d+;\d+\.\d+$/);
@@ -705,7 +733,7 @@ test.describe("Seeker Question Code Generation", () => {
   test("measuring stadtbezirksgrenze code is generated", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='measuring']").getByRole("button", { name: "Stadtbezirksgrenze", exact: true }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     expect(code).toMatch(/^MEAS_[A-Z0-9]{4}_border_stadtbezirk_\d+(?:,\d+)?_\d+\.\d+;\d+\.\d+$/);
@@ -718,7 +746,7 @@ test.describe("Seeker Apply Answers", () => {
   test("applying answer without matching question fails", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByPlaceholder("A_RADAR_1A2B_JA").fill("A_RADAR_AB12_JA");
     await page.getByRole("button", { name: "Antwort anwenden" }).click();
     await expect(page.getByText(/passt zu keiner/)).toBeVisible();
@@ -727,7 +755,7 @@ test.describe("Seeker Apply Answers", () => {
   test("applying a matching answer to a generated question works", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
     const qid = code.match(/^RADAR_([A-Z0-9]{4})_/)![1];
@@ -740,7 +768,7 @@ test.describe("Seeker Apply Answers", () => {
   test("applying answer marks the radar button as used", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const radarCard = page.locator("[data-cat='radar']");
     await radarCard.getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
@@ -759,7 +787,7 @@ test.describe("Seeker Foto Questions", () => {
   test("clicking foto question shows confirmation with description", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='foto'] .q-btn").filter({ hasText: "Baum" }).click();
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
     await expect(page.getByText(/ganzen Baum/)).toBeVisible();
@@ -768,7 +796,7 @@ test.describe("Seeker Foto Questions", () => {
   test("confirming foto question marks it as used", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const btn = page.locator("[data-cat='foto'] .q-btn").filter({ hasText: "Himmel" });
     await btn.click();
     await page.getByRole("button", { name: /Ja, stellen/ }).click();
@@ -778,7 +806,7 @@ test.describe("Seeker Foto Questions", () => {
   test("using foto question twice marks it as exhausted", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const btn = page.locator("[data-cat='foto'] .q-btn").filter({ hasText: "Baum" });
     await btn.click();
     await page.getByRole("button", { name: /Ja, stellen/ }).click();
@@ -791,7 +819,7 @@ test.describe("Seeker Foto Questions", () => {
   test("second foto question shows doubled reward", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const btn = page.locator("[data-cat='foto'] .q-btn").filter({ hasText: "Selfie" });
     await btn.click();
     await page.getByRole("button", { name: /Ja, stellen/ }).click();
@@ -802,7 +830,7 @@ test.describe("Seeker Foto Questions", () => {
   test("foto descriptions appear in confirmation dialogs", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     const card = page.locator("[data-cat='foto']");
 
     const checks: [string, RegExp][] = [
@@ -826,7 +854,7 @@ test.describe("Full Round-Trip Scenarios", () => {
   test("RADAR round-trip: generate, evaluate, apply, filter", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -835,7 +863,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_RADAR_/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByPlaceholder("A_RADAR_1A2B_JA").fill(answerCode);
     await page.getByRole("button", { name: "Antwort anwenden" }).click();
     await expect(page.getByText(/Antwort angewendet/)).toBeVisible();
@@ -845,7 +873,7 @@ test.describe("Full Round-Trip Scenarios", () => {
   test("MATCH_DISTRICT bezirk round-trip", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Bezirk", exact: true }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -854,7 +882,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_MATCH_.*_(JA|NEIN)$/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByPlaceholder("A_RADAR_1A2B_JA").fill(answerCode);
     await page.getByRole("button", { name: "Antwort anwenden" }).click();
     await expect(page.getByText(/Antwort angewendet/)).toBeVisible();
@@ -863,7 +891,7 @@ test.describe("Full Round-Trip Scenarios", () => {
   test("MPOI round-trip for schulen", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='matching']").getByRole("button", { name: "Schule", exact: true }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -872,7 +900,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_MPOI_.*_(JA|NEIN)$/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByPlaceholder("A_RADAR_1A2B_JA").fill(answerCode);
     await page.getByRole("button", { name: "Antwort anwenden" }).click();
     await expect(page.getByText(/Antwort angewendet/)).toBeVisible();
@@ -881,7 +909,7 @@ test.describe("Full Round-Trip Scenarios", () => {
   test("MEAS round-trip for kitas", async ({ page }) => {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='measuring']").getByRole("button", { name: "Kita", exact: true }).click();
     const questionCode = await page.locator("textarea[readonly]").first().inputValue();
     await page.getByRole("button", { name: "Zur Startseite" }).click();
@@ -890,7 +918,7 @@ test.describe("Full Round-Trip Scenarios", () => {
     const answerCode = await hiderEvaluate(page, questionCode);
     expect(answerCode).toMatch(/^A_MEAS_.*_(CLOSER|FURTHER)$/);
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.getByPlaceholder("A_RADAR_1A2B_JA").fill(answerCode);
     await page.getByRole("button", { name: "Antwort anwenden" }).click();
     await expect(page.getByText(/Antwort angewendet/)).toBeVisible();
@@ -903,7 +931,7 @@ test.describe("Seeker Stop Filtering", () => {
   test("RADAR JA answer reduces stop count", async ({ page }) => {
     await mockGeo(page, 52.0, 7.7);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await page.locator("[data-cat='radar']").getByRole("button", { name: "250 m" }).click();
     await page.locator("[data-cat='radar']").getByRole("button", { name: "Radar-Code erzeugen" }).click();
     const code = await page.locator("textarea[readonly]").first().inputValue();
@@ -940,7 +968,7 @@ test.describe("Marker Clustering", () => {
   test("clusters appear when zoomed out (scale > 500 m) and vanish when zoomed in", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await waitForGps(page);
 
@@ -958,7 +986,7 @@ test.describe("Marker Clustering", () => {
   test("cluster badges show the number of grouped stops (>= 2)", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await waitForGps(page);
 
@@ -990,7 +1018,7 @@ test.describe("Busline Question Hint", () => {
   async function seekerWithLines(page: Page) {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await waitForGps(page);
     const select = page.locator(".q-busline-row select");
@@ -1002,7 +1030,7 @@ test.describe("Busline Question Hint", () => {
   test("clicking Buslinie without a selection warns to pick a line", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     await page.getByRole("button", { name: /Buslinie/ }).click();
     await expect(page.getByText("Bitte eine Buslinie auswählen.")).toBeVisible();
@@ -1042,7 +1070,7 @@ test.describe("Seeker Radar Area Drawing", () => {
   async function askRadarAndAnswer(page: Page, presetLabel: string) {
     await mockGeo(page, 51.9625, 7.6283);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await gotoSeeker(page);
     await waitForMap(page);
     const card = page.locator("[data-cat='radar']");
     await card.getByRole("button", { name: presetLabel }).click();
