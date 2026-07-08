@@ -66,6 +66,91 @@ body {
   gap: 10px;
 }
 
+/* ── Flüche 1-10 ─────────────────────────────────────────── */
+.curses-view {
+  margin: auto;
+  width: min(560px, 94vw);
+  text-align: center;
+  padding: 24px 8px 48px;
+}
+
+.curses-view > h2 {
+  margin: 0 0 4px;
+}
+
+.curse-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 18px 0 26px;
+}
+
+.curse-num {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  border: 2px solid #173654;
+  background: #ffffff;
+  color: #173654;
+  font-size: 1.2rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, transform 0.05s;
+}
+
+.curse-num:hover {
+  background: #e6eef7;
+}
+
+.curse-num:active {
+  transform: scale(0.94);
+}
+
+.curse-num--active {
+  background: #173654;
+  color: #ffffff;
+}
+
+.curse-card {
+  max-width: 460px;
+  margin: 0 auto;
+  min-height: 440px;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 30px 28px;
+  box-shadow: 0 12px 40px rgba(26, 45, 79, 0.18);
+}
+
+.curse-card-title {
+  margin: 0 0 20px;
+  font-size: 1.9rem;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: #16263a;
+}
+
+.curse-card-desc {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.curse-card-cost {
+  margin: 0;
+  margin-top: auto;
+  padding-top: 24px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #1e293b;
+}
+
 .game-layout {
   display: grid;
   grid-template-columns: 370px 1fr;
@@ -504,7 +589,7 @@ textarea {
 }
 
 .q-btn--used::after {
-  content: "✓";
+  content: "✓" / "";
   position: absolute;
   top: -7px;
   right: -7px;
@@ -538,7 +623,7 @@ textarea {
 }
 
 .q-btn--exhausted::after {
-  content: "✗";
+  content: "✗" / "";
   position: absolute;
   top: -7px;
   right: -7px;

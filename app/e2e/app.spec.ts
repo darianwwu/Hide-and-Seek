@@ -490,6 +490,20 @@ test.describe("Hider Question Overview", () => {
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
     await expect(page.getByText(/doppelte Belohnung/)).toBeVisible();
   });
+
+  test("overview category header keeps the base reward after a question of that category was asked", async ({ page }) => {
+    await mockGeo(page, 51.9625, 7.6283);
+    await freshStart(page);
+    await selectRole(page, "hider");
+    await selectHideout(page, "prinzipalmarkt");
+    // Ask a 1 km radar once → the RADAR_1 sub-question is now "used"...
+    await hiderEvaluate(page, "RADAR_AB12_51.96250;7.62830;1km");
+    await page.locator("button.poi-menu-toggle", { hasText: /Fragen/ }).click();
+    // ...but the category header must still show the BASE reward, not the doubled one.
+    const radarHeading = page.locator(".hider-overview").getByRole("heading", { name: /Radar/ });
+    await expect(radarHeading).toContainText("2 Karten ziehen, 1 behalten");
+    await expect(radarHeading).not.toContainText("4 Karten");
+  });
 });
 
 // ── Seeker Panel UI Structure ─────────────────────────────────
@@ -1048,5 +1062,46 @@ test.describe("Seeker Radar Area Drawing", () => {
   test("non-exact radar (500 m) draws no area on the map", async ({ page }) => {
     await askRadarAndAnswer(page, "500 m");
     await expect(page.locator(".leaflet-radarAreas-pane path")).toHaveCount(0);
+  });
+});
+
+// ── Flüche 1-10 ───────────────────────────────────────────────
+
+test.describe("Flüche 1-10", () => {
+  test("header button opens the section with 10 numbered buttons", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await page.getByRole("button", { name: "Flüche 1-10" }).click();
+    await expect(page.getByRole("heading", { name: "Flüche 1-10" })).toBeVisible();
+    await expect(page.locator(".curse-num")).toHaveCount(10);
+    // Nothing is revealed until a number is picked.
+    await expect(page.locator(".curse-card")).toHaveCount(0);
+  });
+
+  test("clicking a number reveals the matching curse card", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await page.getByRole("button", { name: "Flüche 1-10" }).click();
+    await page.locator(".curse-num").nth(2).click(); // #3
+    await expect(page.locator(".curse-card-title")).toHaveText("Fluch der Banane");
+    await expect(page.locator(".curse-card-cost")).toContainText("Kauft selber eine Banane");
+    // Picking another number swaps the card.
+    await page.locator(".curse-num").nth(7).click(); // #8
+    await expect(page.locator(".curse-card-title")).toHaveText("Fluch des Kommunismus");
+    await expect(page.locator(".curse-card-cost")).toContainText("Kosten:");
+  });
+
+  test("Zurück returns to the game view", async ({ page }) => {
+    await mockGeo(page);
+    await freshStart(page);
+    await selectRole(page, "seeker");
+    await page.getByRole("button", { name: "Flüche 1-10" }).click();
+    await expect(page.locator(".curse-picker")).toBeVisible();
+    // "Zur Startseite" must be hidden while on the Flüche page.
+    await expect(page.getByRole("button", { name: "Zur Startseite" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Zurück" }).click();
+    await expect(page.locator(".curse-picker")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Sucher" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Zur Startseite" })).toBeVisible();
   });
 });

@@ -980,6 +980,70 @@ const QUESTION_CATEGORIES: { group: string; reward: string; time: string; items:
   ]},
 ];
 
+// The 10 curse cards shown in the "Flüche 1-10" section (Verstecker reference).
+const CURSES: { title: string; description: string; cost: string }[] = [
+  {
+    title: "Fluch der KiKa-Figuren",
+    description:
+      "Die Sucher suchen sich drei KiKa Figuren aus und weisen ihnen jeweils eine Zahl auf dem Würfel zu. Dann wird gewürfelt. Kommt eine Zahl einer Figur, müssen die Sucher zur Figur gehen und ein Foto mit dieser machen bevor die nächste Frage gestellt werden darf. Kommt eine andere Zahl, passiert nichts.",
+    cost: "Legt eine Zeitbonus-Karte und einen anderen Fluch ab.",
+  },
+  {
+    title: "Fluch der gemalten KiKa-Figuren",
+    description:
+      "Schickt einem Sucher privat drei KiKa Figuren. Er hat dann 3 Minuten Zeit, drei Bilder mit Bleistift von diesen Figuren zu malen. Wenn der andere Sucher alle drei richtig errät, ist der Fluch gebrochen und es darf die nächste Frage gestellt werden. Nach einem gescheiterten Versuch muss 5 Minuten gewartet werden und die Verstecker dürfen sich in der Zeit 3 neue Figuren aussuchen. Die Sucher dürfen sich beide jederzeit eine vollständige Liste mit Fotos der Figuren anschauen.",
+    cost: "Werft einen Würfel. Würfelt ihr eine 6, hat diese Karte keinen Effekt.",
+  },
+  {
+    title: "Fluch der Banane",
+    description:
+      "Die Sucher müssen pro Teammitglied eine Banane kaufen und essen. Die Bananen dürfen nicht im gleichen Geschäft gekauft werden (wohl aber z. B. in verschiedenen Geschäften innerhalb eines Einkaufszentrums). Erst danach darf die nächste Frage gestellt werden.",
+    cost: "Kauft selber eine Banane. Wenn in eurem Versteckradius keine Bananen verkauft werden, habt ihr Glück und müsst nichts tun.",
+  },
+  {
+    title: "Fluch der gefärbten Haare",
+    description:
+      "Ihr habt fünf Minuten Zeit, möglichst viele verschiedene Leute mit bunt gefärbten Haaren zu fotografieren. Teilt eure Zahl dann den Suchern mit. Schaffen sie es nicht, in 5 Minuten mindestens genau so viele verschiedene Leute mit bunt gefärbten Haaren zu fotografieren, dürft ihr die obersten zwei Karten ziehen und behalten.",
+    cost: "Fotos von Leuten mit bunt gefärbten Haaren.",
+  },
+  {
+    title: "Fluch der Flucht",
+    description:
+      "Ein Sucher muss sich (ohne sich mit dem Anderen abzusprechen) in 3 Minuten so verstecken, dass er mindestens 100 Meter vom Anderen entfernt ist und nicht vom aktuellen Standpunkt zu sehen ist. Der Andere hält sich so lange die Augen zu und muss nach Ablauf der 3 Minuten den Anderen ohne Kommunikation finden, bevor die nächste Frage gestellt werden darf. Gelingt dies nach 15 Minuten nicht, dürfen sich die Sucher wieder treffen, aber erst nach weiteren 15 Minuten die nächste Frage stellen.",
+    cost: "Werft einen Würfel. Bei einer ungeraden Zahl hat diese Karte keinen Effekt.",
+  },
+  {
+    title: "Fluch des Dialekts",
+    description:
+      "Die Sucher müssen sich 5 Minuten nur auf thüringischem Dialekt unterhalten. Spricht einer von ihnen Hochdeutsch, dürfen sie sich erst nach 15 weiteren Minuten wieder unterhalten. Anderweitige Kommunikation (z. B. über Text) ist verboten. Mimik und Gestik sind erlaubt.",
+    cost: "Werft einen Würfel. Würfelt ihr eine 1 oder 2, hat diese Karte keinen Effekt.",
+  },
+  {
+    title: "Fluch der Warteschlange",
+    description:
+      "„Erst anstellen!“ Die Sucher müssen sich an einer echten Schlange mit mindestens 3 Personen anstellen (Bäckerei, Supermarktkasse, Imbiss) und etwas kaufen. Dabei müssen sie jede Person, die sich hinter ihnen anstellt, fragen, ob sie vor möchte (bis eine Person nein sagt). Sie dürfen die nächste Frage erst stellen, wenn sie an der Reihe waren und bezahlt haben.",
+    cost: "Legt eine Zeitbonus-Karte ab.",
+  },
+  {
+    title: "Fluch des Kommunismus",
+    description:
+      "Ab sofort herrscht Planwirtschaft: Die Sucher dürfen ihre nächste Frage nicht mehr frei wählen. Die Verstecker geben ihnen zwei Kategorien vor, aus denen die nächsten beiden Fragen stammen müssen.",
+    cost: "Werft einen Würfel. Bei einer geraden Zahl hat diese Karte keinen Effekt.",
+  },
+  {
+    title: "Fluch des Kollektivs",
+    description:
+      "Individualismus ist abgeschafft. Die Sucher dürfen sich für die nächsten 15 Minuten nicht weiter als 2 Meter voneinander trennen und jede Nachricht muss mit dem Präfix „per einstimmigem Beschluss verkündet das Volk:“ versehen werden.",
+    cost: "Legt eine Zeitbonus-Karte ab.",
+  },
+  {
+    title: "Fluch der Mangelwirtschaft",
+    description:
+      "Die Sucher müssen in einem Laden ein tatsächlich leergeräumtes Regal oder ein „Ausverkauft“-Schild finden und fotografieren, bevor die nächste Frage gestellt werden darf.",
+    cost: "Werft einen Würfel. Bei einer geraden Zahl hat diese Karte keinen Effekt.",
+  },
+];
+
 function qBtnCls(key: string, counts: Map<string, number>): string {
   const c = counts.get(key) ?? 0;
   if (c >= 2) return " q-btn--exhausted";
@@ -1098,6 +1162,8 @@ function App() {
   const [previewStopId, setPreviewStopId] = useState<string | null>(null);
   const [mapClickPopup, setMapClickPopup] = useState<MapClickPopup | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [cursesOpen, setCursesOpen] = useState(false);
+  const [selectedCurse, setSelectedCurse] = useState<number | null>(null);
 
   const [hiderInputCode, setHiderInputCode] = useState("");
   const [hiderFeedback, setHiderFeedback] = useState("");
@@ -1699,15 +1765,46 @@ function App() {
       <header className="topbar">
         <h1>Hide and Seek</h1>
         <div className="topbar-right">
-          {role !== "landing" && (
-            <button className="btn ghost" onClick={() => setRole("landing")}>
+          <button
+            className={`btn ghost${cursesOpen ? " active-btn" : ""}`}
+            onClick={() => setCursesOpen((v) => !v)}
+          >
+            {cursesOpen ? "Zurück" : "Flüche 1-10"}
+          </button>
+          {!cursesOpen && role !== "landing" && (
+            <button className="btn ghost" onClick={() => { setCursesOpen(false); setRole("landing"); }}>
               Zur Startseite
             </button>
           )}
         </div>
       </header>
 
-      {role === "landing" && (
+      {cursesOpen && (
+        <main className="curses-view">
+          <h2>Flüche 1-10</h2>
+          <p className="meta">Wähle eine Nummer, um den Fluch anzuzeigen.</p>
+          <div className="curse-picker">
+            {CURSES.map((_, i) => (
+              <button
+                key={i}
+                className={`curse-num${selectedCurse === i ? " curse-num--active" : ""}`}
+                onClick={() => setSelectedCurse(i)}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+          {selectedCurse !== null && (
+            <div className="curse-card">
+              <h3 className="curse-card-title">{CURSES[selectedCurse].title}</h3>
+              <p className="curse-card-desc">{CURSES[selectedCurse].description}</p>
+              <p className="curse-card-cost"><strong>Kosten:</strong> {CURSES[selectedCurse].cost}</p>
+            </div>
+          )}
+        </main>
+      )}
+
+      {!cursesOpen && role === "landing" && (
         <main className="landing">
           <h2>Stadt auswaehlen</h2>
           <div className="landing-actions">
@@ -1767,7 +1864,7 @@ function App() {
         </main>
       )}
 
-      {(role === "hider" || role === "seeker") && (
+      {!cursesOpen && (role === "hider" || role === "seeker") && (
         <main className="game-layout">
           <aside className="panel">
             {mapLayerControls}
@@ -1784,6 +1881,7 @@ function App() {
                 {hiderAnswerCode && (
                   <div className="card" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
                     <label style={{ color: "#166534", fontWeight: 700 }}>Letzter Antwortcode</label>
+                    {hiderFeedback && <p className="meta" style={{ margin: "0 0 6px", color: "#166534" }}>{hiderFeedback}</p>}
                     <textarea readOnly value={hiderAnswerCode} style={{ fontSize: "0.85rem" }} />
                     <button className="btn ghost" onClick={() => copyText(hiderAnswerCode)}>Rauskopieren</button>
                   </div>
@@ -1884,10 +1982,12 @@ function App() {
                   {hiderOverviewOpen && (
                     <div className="hider-overview">
                       {QUESTION_CATEGORIES.map((cat) => {
-                        const anyUsed = cat.items.some((item) => (hiderUsedSubKeys.get(item.subKey) ?? 0) >= 1);
                         return (
                         <div key={cat.group} className="hider-overview-group">
-                          <h4>{cat.group} <span className="hider-overview-reward">🎴 {anyUsed ? doubleReward(cat.reward) : cat.reward} · ⏱️ {cat.time}</span></h4>
+                          {/* Category header always shows the base reward. The doubled reward
+                              applies per question — only when the exact same question is asked
+                              again — and is surfaced in the question preview, not here. */}
+                          <h4>{cat.group} <span className="hider-overview-reward">🎴 {cat.reward} · ⏱️ {cat.time}</span></h4>
                           <div className="q-grid">
                             {cat.items.map((item) => {
                               const count = hiderUsedSubKeys.get(item.subKey) ?? 0;
