@@ -24,7 +24,7 @@ async function selectRole(page: Page, role: "hider" | "seeker") {
 test.describe("Erfurt city", () => {
   test("landing shows the city picker", async ({ page }) => {
     await erfurtStart(page);
-    await expect(page.getByRole("heading", { name: "Stadt auswaehlen" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Stadt auswählen" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Erfurt", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Münster", exact: true })).toBeVisible();
   });

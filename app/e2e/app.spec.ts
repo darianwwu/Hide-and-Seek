@@ -56,7 +56,7 @@ test.describe("Landing Page", () => {
   test("shows role selection buttons", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await expect(page.getByRole("heading", { name: "Rolle auswaehlen" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Rolle auswählen" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Verstecker", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sucher", exact: true })).toBeVisible();
   });
@@ -80,7 +80,7 @@ test.describe("Landing Page", () => {
     await freshStart(page);
     await selectRole(page, "seeker");
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await expect(page.getByRole("heading", { name: "Rolle auswaehlen" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Rolle auswählen" })).toBeVisible();
   });
 });
 
@@ -90,7 +90,7 @@ test.describe("Game Reset", () => {
   test("reset button shows confirmation dialog", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await page.getByRole("button", { name: "Spiel zuruecksetzen" }).click();
+    await page.getByRole("button", { name: "Spiel zurücksetzen" }).click();
     await expect(page.locator(".question-preview-overlay")).toBeVisible();
     await expect(page.getByText(/Bist du sicher/)).toBeVisible();
   });
@@ -100,7 +100,7 @@ test.describe("Game Reset", () => {
     await freshStart(page);
     await selectRole(page, "seeker");
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await page.getByRole("button", { name: "Spiel zuruecksetzen" }).click();
+    await page.getByRole("button", { name: "Spiel zurücksetzen" }).click();
     await page.getByRole("button", { name: "Abbrechen" }).click();
     await expect(page.locator(".question-preview-overlay")).not.toBeVisible();
   });
@@ -110,15 +110,15 @@ test.describe("Game Reset", () => {
     await freshStart(page);
     await selectRole(page, "seeker");
     await page.getByRole("button", { name: "Zur Startseite" }).click();
-    await page.getByRole("button", { name: "Spiel zuruecksetzen" }).click();
-    await page.getByRole("button", { name: "Ja, zuruecksetzen" }).click();
+    await page.getByRole("button", { name: "Spiel zurücksetzen" }).click();
+    await page.getByRole("button", { name: "Ja, zurücksetzen" }).click();
     // After reset, hs_role is removed; useEffects write back empty state for other keys
     const askedCodes = await page.evaluate(() => localStorage.getItem("hs_askedCodes"));
     expect(JSON.parse(askedCodes ?? "{}")).toEqual({});
     const appliedAnswers = await page.evaluate(() => localStorage.getItem("hs_appliedAnswers"));
     expect(JSON.parse(appliedAnswers ?? "{}")).toEqual({});
     // The landing page should be shown
-    await expect(page.getByRole("heading", { name: "Rolle auswaehlen" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Rolle auswählen" })).toBeVisible();
   });
 });
 
@@ -1071,6 +1071,7 @@ test.describe("Flüche 1-10", () => {
   test("header button opens the section with 10 numbered buttons", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
+    await selectRole(page, "hider");
     await page.getByRole("button", { name: "Flüche 1-10" }).click();
     await expect(page.getByRole("heading", { name: "Flüche 1-10" })).toBeVisible();
     await expect(page.locator(".curse-num")).toHaveCount(10);
@@ -1081,6 +1082,7 @@ test.describe("Flüche 1-10", () => {
   test("clicking a number reveals the matching curse card", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
+    await selectRole(page, "hider");
     await page.getByRole("button", { name: "Flüche 1-10" }).click();
     await page.locator(".curse-num").nth(2).click(); // #3
     await expect(page.locator(".curse-card-title")).toHaveText("Fluch der Banane");
@@ -1094,14 +1096,14 @@ test.describe("Flüche 1-10", () => {
   test("Zurück returns to the game view", async ({ page }) => {
     await mockGeo(page);
     await freshStart(page);
-    await selectRole(page, "seeker");
+    await selectRole(page, "hider");
     await page.getByRole("button", { name: "Flüche 1-10" }).click();
     await expect(page.locator(".curse-picker")).toBeVisible();
     // "Zur Startseite" must be hidden while on the Flüche page.
     await expect(page.getByRole("button", { name: "Zur Startseite" })).toHaveCount(0);
     await page.getByRole("button", { name: "Zurück" }).click();
     await expect(page.locator(".curse-picker")).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Sucher" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Verstecker" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Zur Startseite" })).toBeVisible();
   });
 });

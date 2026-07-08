@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A German-language web app for playing a *Jet Lag: The Game*–style "Hide and Seek" match in **Münster, Germany**. One player is the **Verstecker** (Hider), the other the **Sucher** (Seeker). The two phones are never connected — the entire game loop runs through **text codes copy-pasted between devices** (see "The code protocol" below). The UI language is German throughout (some headings deliberately use ASCII spellings like `auswaehlen`/`zuruecksetzen`).
+A German-language web app for playing a *Jet Lag: The Game*–style "Hide and Seek" match in **Münster, Germany**. One player is the **Verstecker** (Hider), the other the **Sucher** (Seeker). The two phones are never connected — the entire game loop runs through **text codes copy-pasted between devices** (see "The code protocol" below). The UI language is German throughout, using proper umlauts (`ä`/`ö`/`ü`/`ß`) in all user-facing text.
 
 The deployable app lives entirely in **`app/`**. The repository root holds the data-preparation pipeline (Python scripts + source GIS data) that generates the app's committed data files.
 
@@ -69,7 +69,7 @@ Key geometry helpers in `App.tsx`: `haversineKm`, `pointInRing`/`pointInGeometry
 
 ### Persistence
 
-All game state is mirrored to `localStorage` under `hs_`-prefixed keys (`hs_role`, `hs_hideout`, `hs_askedCodes`, `hs_appliedAnswers`, `hs_hiderUsed`, `hs_usedFoto`, `hs_latestCode`) via the `lsGet`/`lsSet` helpers. "Spiel zuruecksetzen" removes all of them. GPS comes from `useCurrentLocation` (a `watchPosition` wrapper).
+All game state is mirrored to `localStorage` under `hs_`-prefixed keys (`hs_role`, `hs_hideout`, `hs_askedCodes`, `hs_appliedAnswers`, `hs_hiderUsed`, `hs_usedFoto`, `hs_latestCode`) via the `lsGet`/`lsSet` helpers. "Spiel zurücksetzen" removes all of them. GPS comes from `useCurrentLocation` (a `watchPosition` wrapper).
 
 ## Deployment
 

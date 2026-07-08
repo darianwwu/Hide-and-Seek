@@ -245,7 +245,7 @@ test("SIM A: Altstadt game at Anger (radar, match, measure, exact endgame)", asy
     await seeker.goto(URL);
     await seeker.evaluate(() => localStorage.clear());
     await seeker.goto(URL);
-    await expect(seeker.getByRole("heading", { name: "Stadt auswaehlen" })).toBeVisible();
+    await expect(seeker.getByRole("heading", { name: "Stadt auswählen" })).toBeVisible();
     await seeker.getByRole("button", { name: "Erfurt", exact: true }).click();
     // switchCity persists hs_city and reloads; afterwards Erfurt is the active (non-ghost) city
     await expect(seeker.getByRole("button", { name: "Erfurt", exact: true })).not.toHaveClass(/ghost/, { timeout: 15_000 });

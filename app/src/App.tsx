@@ -1763,14 +1763,16 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <h1>Hide and Seek</h1>
+        <h1>{role === "hider" ? "Verstecker" : role === "seeker" ? "Sucher" : "Hide and Seek"}</h1>
         <div className="topbar-right">
-          <button
-            className={`btn ghost${cursesOpen ? " active-btn" : ""}`}
-            onClick={() => setCursesOpen((v) => !v)}
-          >
-            {cursesOpen ? "Zurück" : "Flüche 1-10"}
-          </button>
+          {role === "hider" && (
+            <button
+              className={`btn ghost${cursesOpen ? " active-btn" : ""}`}
+              onClick={() => setCursesOpen((v) => !v)}
+            >
+              {cursesOpen ? "Zurück" : "Flüche 1-10"}
+            </button>
+          )}
           {!cursesOpen && role !== "landing" && (
             <button className="btn ghost" onClick={() => { setCursesOpen(false); setRole("landing"); }}>
               Zur Startseite
@@ -1806,7 +1808,7 @@ function App() {
 
       {!cursesOpen && role === "landing" && (
         <main className="landing">
-          <h2>Stadt auswaehlen</h2>
+          <h2>Stadt auswählen</h2>
           <div className="landing-actions">
             {Object.values(CITIES).map((c) => (
               <button
@@ -1818,7 +1820,7 @@ function App() {
               </button>
             ))}
           </div>
-          <h2 style={{ marginTop: 24 }}>Rolle auswaehlen</h2>
+          <h2 style={{ marginTop: 24 }}>Rolle auswählen</h2>
           <div className="landing-actions">
             <button className="btn" onClick={() => setRole("hider")}>
               Verstecker
@@ -1832,13 +1834,13 @@ function App() {
             style={{ marginTop: 24, fontSize: "0.82rem" }}
             onClick={() => setShowResetConfirm(true)}
           >
-            Spiel zuruecksetzen
+            Spiel zurücksetzen
           </button>
 
           {showResetConfirm && (
             <div className="question-preview-overlay" onClick={() => setShowResetConfirm(false)}>
               <div className="question-preview-box" onClick={(e) => e.stopPropagation()}>
-                <p className="question-preview-text">Bist du sicher, dass du das Spiel zurecksetzen moechtest? Alle Daten gehen verloren.</p>
+                <p className="question-preview-text">Bist du sicher, dass du das Spiel zurücksetzen möchtest? Alle Daten gehen verloren.</p>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="btn" style={{ flex: 1, background: "#dc2626", borderColor: "#dc2626" }} onClick={() => {
                     const keys = ["hs_role", "hs_hideout", "hs_hiderUsed", "hs_usedFoto", "hs_askedCodes", "hs_latestCode", "hs_appliedAnswers"];
@@ -1855,7 +1857,7 @@ function App() {
                     setAnswerInput("");
                     setAnswerFeedback("");
                     setShowResetConfirm(false);
-                  }}>Ja, zuruecksetzen</button>
+                  }}>Ja, zurücksetzen</button>
                   <button className="btn ghost" style={{ flex: 1 }} onClick={() => setShowResetConfirm(false)}>Abbrechen</button>
                 </div>
               </div>
@@ -1871,11 +1873,9 @@ function App() {
 
             {role === "hider" && (
               <>
-                <h2>Verstecker</h2>
-                <p className="meta">Wahle eine Haltestelle auf der Karte als Versteck.</p>
                 <div className="row">
                   <label>Aktuelles Versteck</label>
-                  <strong>{selectedStop?.name ?? "Noch nicht gewaehlt"}</strong>
+                  <strong>{selectedStop?.name ?? "Noch nicht gewählt (Wählen durch Klicken in der Karte)"}</strong>
                 </div>
 
                 {hiderAnswerCode && (
@@ -2056,8 +2056,6 @@ function App() {
 
             {role === "seeker" && (
               <>
-                <h2>Sucher</h2>
-                <p className="meta">Stelle Fragen und wende die Antworten des Versteckers an.</p>
                 <div className="row" ref={questionCodeRowRef}>
                   <textarea readOnly value={latestQuestionCode} />
                   <button className="btn ghost" onClick={() => copyText(latestQuestionCode)}>
@@ -2147,7 +2145,7 @@ function App() {
                       </>
                     )}
                   </p>
-                  <button className="btn ghost" onClick={resetThermometer}>Thermometer zuruecksetzen</button>
+                  <button className="btn ghost" onClick={resetThermometer}>Thermometer zurücksetzen</button>
                   <button className="q-btn" onClick={() => generateQuestion("THERMO_PATH")}>Thermometer-Code erzeugen</button>
                 </CategoryCard>
 
